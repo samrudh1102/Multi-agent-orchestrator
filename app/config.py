@@ -139,7 +139,7 @@ class Settings(BaseSettings):
     databricks_mcp_args: list[str] = [str(_DATABRICKS_MCP_SERVER)]
 
     databricks_host: str | None = None
-    databricks_toke: str | None = None
+    databricks_token: str | None = None
     databricks_warehouse_id: str | None = None
     # -------------------------------------------------------------------------
     # Helper Paths
