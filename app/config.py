@@ -5,11 +5,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Path to our local FastMCP TestRail server (app/testrail/mcp_server.py).
 _TESTRAIL_MCP_SERVER = Path(__file__).resolve().parent / "testrail" / "mcp_server.py"
-_S3_MCP_SERVER = Path(__file__).resolve().parent / "s3" / "mcp_server.py"
 _REDSHIFT_MCP_SERVER = Path(__file__).resolve().parent / "redshift" / "mcp_server.py"
-_CLICKHOUSE_MCP_SERVER = Path(__file__).resolve().parent / "clickhouse" / "mcp_server.py"
 _AIRFLOW_MCP_SERVER = Path(__file__).resolve().parent / "airflow" / "mcp_server.py"
-_DATABRICKS_MCP_SERVER = Path(__file__).resolve().parent / "databricks" / "mcp_server.py"
+# NOTE: app/s3/mcp_server.py, app/databricks/mcp_server.py and
+# app/clickhouse/mcp_server.py still exist for reference but are no longer
+# launched — S3, Databricks and ClickHouse now go through their vendors'
+# official remote MCP servers configured below instead of these local ones.
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -79,17 +80,29 @@ class Settings(BaseSettings):
     testrail_api_key: str | None = None
 
     # -------------------------------------------------------------------------
-    # S3 MCP
+    # S3 MCP (AWS's official remote MCP Server, reached via AWS's official
+    # mcp-proxy-for-aws bridge — see app/langgraph_agent/fastmcp_client.py)
     # -------------------------------------------------------------------------
-
-    # Command to run the S3 MCP server. We support 'uvx' (Python-based) or 'npx' (JS-based).
-    s3_mcp_command: str = sys.executable
-    s3_mcp_args: list[str] = [str(_S3_MCP_SERVER)]
 
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
     aws_default_region: str | None = None
-    
+
+    # mcp-proxy-for-aws is AWS's own published stdio<->SigV4 bridge: the MCP
+    # spec only supports OAuth, but the AWS MCP Server is authenticated with
+    # IAM SigV4, so AWS ships this proxy instead of a plain streamable_http
+    # endpoint. It signs requests locally using the AWS_ACCESS_KEY_ID/
+    # AWS_SECRET_ACCESS_KEY/AWS_DEFAULT_REGION above and forwards them to
+    # aws_mcp_endpoint. No local S3 business logic runs here anymore.
+    aws_mcp_proxy_command: str = "uvx"
+    aws_mcp_proxy_package: str = "mcp-proxy-for-aws@latest"
+    aws_mcp_endpoint: str = "https://aws-mcp.us-east-1.api.aws/mcp"
+    aws_mcp_region: str | None = None
+    # The official server exposes a generic `call_aws` tool covering all AWS
+    # APIs (not just S3). Keep it read-only since our previous local S3 tools
+    # (list_buckets/list_objects/get_object) were read-only too.
+    aws_mcp_read_only: bool = True
+
     # -------------------------------------------------------------------------
     # Redshift MCP
     # -------------------------------------------------------------------------
@@ -106,16 +119,23 @@ class Settings(BaseSettings):
     # ClickHouse MCP
     # -------------------------------------------------------------------------
 
-    # Launch our local FastMCP ClickHouse server (app/clickhouse/mcp_server.py) over stdio
-    # using the same interpreter that runs the app, so it always picks up
-    # this venv's dependencies.
-    clickhouse_mcp_command: str = sys.executable
-    clickhouse_mcp_args: list[str] = [str(_CLICKHOUSE_MCP_SERVER)]
-
+    # Direct REST credentials for your ClickHouse Cloud service. No longer
+    # used to launch the local MCP server (app/clickhouse/mcp_server.py,
+    # kept in-repo for reference but unused) — the MCP client now talks to
+    # ClickHouse Cloud's own remote MCP server instead (see below). Still
+    # used directly by scripts/seed_jira_mock.py.
     clickhouse_url: str | None = None
     clickhouse_user: str | None = None
     clickhouse_password: str | None = None
     clickhouse_database: str | None = None
+
+    # ClickHouse Cloud's remote MCP server (single global endpoint, private
+    # preview). Auth is interactive OAuth 2.0 only (no API key/password
+    # option), so this mirrors the Jira setup: run
+    # scripts/setup_clickhouse_auth.py once to log in, and the running app
+    # only loads/refreshes the saved tokens from clickhouse_token_path.
+    clickhouse_mcp_url: str = "https://mcp.clickhouse.cloud/mcp"
+    clickhouse_token_path: str = "data/mcp_tokens/clickhouse.json"
 
     # -------------------------------------------------------------------------
     # Airflow MCP
@@ -132,15 +152,18 @@ class Settings(BaseSettings):
     airflow_password: str | None = None
 
     # -------------------------------------------------------------------------
-    # Databricks MCP
+    # Databricks MCP (Databricks' own managed remote MCP server, reached over
+    # streamable_http — see app/langgraph_agent/fastmcp_client.py)
     # -------------------------------------------------------------------------
-
-    databricks_mcp_command: str = sys.executable
-    databricks_mcp_args: list[str] = [str(_DATABRICKS_MCP_SERVER)]
 
     databricks_host: str | None = None
     databricks_token: str | None = None
+    # No longer sent by the client: Databricks' managed /api/2.0/mcp/sql
+    # endpoint picks the SQL Warehouse server-side (per-user default
+    # warehouse, configurable in the Databricks workspace UI) rather than
+    # accepting a warehouse_id from the MCP client.
     databricks_warehouse_id: str | None = None
+
     # -------------------------------------------------------------------------
     # Helper Paths
     # -------------------------------------------------------------------------
@@ -155,6 +178,18 @@ class Settings(BaseSettings):
     def index_path(self) -> Path:
         p = Path(self.index_dir)
         p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def databricks_mcp_url(self) -> str | None:
+        if not self.databricks_host:
+            return None
+        return f"{self.databricks_host.rstrip('/')}/api/2.0/mcp/sql"
+
+    @property
+    def clickhouse_token_file(self) -> Path:
+        p = Path(self.clickhouse_token_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
         return p
 
     @property

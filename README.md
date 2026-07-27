@@ -25,11 +25,12 @@ rag-chatbot/
 │       ├── fastmcp_client.py  # FastMCP client -> MCP tools as LangChain tools
 │       └── graph_agent.py     # LangGraph StateGraph agent (RAG + MCP tools)
 ├── scripts/
-│   └── setup_jira_auth.py # One-time interactive OAuth login for Jira's remote MCP server
+│   ├── setup_jira_auth.py       # One-time interactive OAuth login for Jira's remote MCP server
+│   └── setup_clickhouse_auth.py # One-time interactive OAuth login for ClickHouse Cloud's remote MCP server
 ├── data/
 │   ├── uploads/            # temp storage during ingestion
 │   ├── index/              # persisted FAISS index + metadata.json
-│   └── mcp_tokens/         # persisted Jira OAuth tokens (created by setup_jira_auth.py)
+│   └── mcp_tokens/         # persisted Jira/ClickHouse OAuth tokens (created by the setup_*_auth.py scripts)
 └── requirements.txt
 ```
 
@@ -75,11 +76,16 @@ Then create a `.env` file in the project root (it's git-ignored — never commit
 | `JIRA_MCP_URL` | Atlassian hosted URL | Remote Jira MCP endpoint (see [Jira setup](#jira-setup)) |
 | `JIRA_TOKEN_PATH` | `data/mcp_tokens/jira.json` | Where OAuth tokens are stored |
 | `TESTRAIL_URL` / `TESTRAIL_USERNAME` / `TESTRAIL_API_KEY` | — | TestRail credentials (see [TestRail setup](#testrail-setup)) |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_DEFAULT_REGION` | — | AWS creds for S3 / Redshift tools |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_DEFAULT_REGION` | — | AWS creds for S3 (via AWS's remote MCP Server) and Redshift tools |
+| `AWS_MCP_ENDPOINT` | `https://aws-mcp.us-east-1.api.aws/mcp` | AWS's official remote MCP Server endpoint (see [S3 setup](#s3-setup)) |
+| `AWS_MCP_REGION` | `AWS_DEFAULT_REGION` | Region passed to `mcp-proxy-for-aws`; separate from `AWS_DEFAULT_REGION` in case your S3 buckets live in a different region than the MCP endpoint |
+| `AWS_MCP_READ_ONLY` | `true` | Disable write-capable AWS tools in `mcp-proxy-for-aws` |
 | `REDSHIFT_DATABASE` / `REDSHIFT_WORKGROUP_NAME` | — | Redshift Serverless target |
-| `CLICKHOUSE_URL` / `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | — | ClickHouse REST connection |
+| `CLICKHOUSE_URL` / `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | — | ClickHouse Cloud REST connection; no longer used for MCP, only by `scripts/seed_jira_mock.py` |
+| `CLICKHOUSE_MCP_URL` | `https://mcp.clickhouse.cloud/mcp` | ClickHouse Cloud's official remote MCP Server endpoint (see [ClickHouse setup](#clickhouse-setup)) |
+| `CLICKHOUSE_TOKEN_PATH` | `data/mcp_tokens/clickhouse.json` | Where ClickHouse Cloud OAuth tokens are stored |
 | `AIRFLOW_URL` / `AIRFLOW_USERNAME` / `AIRFLOW_PASSWORD` | — | Airflow connection |
-| `DATABRICKS_HOST` / `DATABRICKS_TOKEN` / `DATABRICKS_WAREHOUSE_ID` | — | Databricks SQL warehouse |
+| `DATABRICKS_HOST` / `DATABRICKS_TOKEN` | — | Databricks workspace + PAT for Databricks' remote MCP Server (see [Databricks setup](#databricks-setup)) |
 
 ## Run the server
 
@@ -134,11 +140,13 @@ Debug endpoint (only enabled when `ENABLE_TOOLS=true`): lists the MCP tools curr
 ### `GET /health`
 Basic liveness check.
 
-## MCP tool integration (Jira + TestRail)
+## MCP tool integration (Jira, TestRail, Databricks, S3, ClickHouse, ...)
 
-Beyond document RAG, the chatbot can call out to live Jira and TestRail data via [MCP](https://modelcontextprotocol.io) tools, gated behind `ENABLE_TOOLS` in `.env`. This is additive — document retrieval keeps working as before, and tool-calling is implemented against Gemini.
+Beyond document RAG, the chatbot can call out to live Jira, TestRail, Databricks, S3, ClickHouse and other data via [MCP](https://modelcontextprotocol.io) tools, gated behind `ENABLE_TOOLS` in `.env`. This is additive — document retrieval keeps working as before, and tool-calling is implemented against Gemini.
 
-The implementation (`app/langgraph_agent/`) retrieves RAG context first, then lets the LLM decide per turn whether to call a Jira/TestRail tool or answer directly from context. A [FastMCP](https://gofastmcp.com) client (`fastmcp_client.py`) connects to both servers and exposes their tools as LangChain tools, driven by a LangGraph `StateGraph` (`graph_agent.py`): `START → agent → tools_condition → tools → agent → … → END`. The `agent` node runs `get_tool_chat_model()` (`app/llm.py`), a Gemini chat model bound to the MCP tools via `bind_tools()`. Jira auth reuses the token minted by `setup_jira_auth.py` as a bearer header.
+The implementation (`app/langgraph_agent/`) retrieves RAG context first, then lets the LLM decide per turn whether to call an MCP tool or answer directly from context. A [FastMCP](https://gofastmcp.com)/`langchain-mcp-adapters` client (`fastmcp_client.py`) connects to all configured servers and exposes their tools as LangChain tools, driven by a LangGraph `StateGraph` (`graph_agent.py`): `START → agent → tools_condition → tools → agent → … → END`. The `agent` node runs `get_tool_chat_model()` (`app/llm.py`), a Gemini chat model bound to the MCP tools via `bind_tools()`. Jira, ClickHouse and Databricks auth are sent as bearer headers/OAuth; S3 auth is handled by AWS's own signing proxy (see below).
+
+**Databricks, S3 and ClickHouse go through their vendors' official remote MCP servers, not this repo's own local ones.** `app/databricks/mcp_server.py`, `app/s3/mcp_server.py` and `app/clickhouse/mcp_server.py` still exist in the repo (kept for reference/learning) but are no longer wired up in `app/config.py` / `fastmcp_client.py` — see [Databricks setup](#databricks-setup), [S3 setup](#s3-setup) and [ClickHouse setup](#clickhouse-setup) below for the replacements.
 
 ### Why a separate tool-calling model
 
@@ -174,6 +182,43 @@ Smoke-test the server on its own:
 TESTRAIL_URL=... TESTRAIL_USERNAME=... TESTRAIL_API_KEY=... \
     python app/testrail/mcp_server.py
 ```
+
+### Databricks setup
+
+Databricks tools go through [Databricks' own managed remote MCP server](https://docs.databricks.com/aws/en/generative-ai/mcp/managed-mcp) for SQL Warehouses, at `https://<your-workspace-host>/api/2.0/mcp/sql`, reached directly over streamable HTTP — no local process is started. It exposes `execute_sql`/`poll_response` tools (async SQL execution against your default SQL Warehouse). Auth reuses the same personal access token as before, sent as `Authorization: Bearer <token>`:
+
+```
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=your-databricks-pat
+```
+
+Databricks tools activate when both are set and `ENABLE_TOOLS=true`. Note the previous local server (`app/databricks/mcp_server.py`, kept in-repo for reference) also exposed Unity Catalog browsing (`list_catalogs`/`list_schemas`/`list_tables`) and Jobs API tools (`list_jobs`/`trigger_job`) — Databricks' managed MCP endpoint doesn't have a remote equivalent for these, so only SQL querying is available now. `DATABRICKS_WAREHOUSE_ID` is no longer used by the client; the managed endpoint picks your SQL Warehouse server-side (configurable as a per-user default warehouse in the Databricks workspace UI).
+
+### S3 setup
+
+S3 tools go through [AWS's official remote MCP Server](https://aws.amazon.com/about-aws/whats-new/2026/05/aws-mcp-server/) (GA May 2026), a single managed endpoint covering all AWS APIs (not just S3) via one generic `call_aws` tool. Because that server authenticates with IAM SigV4 rather than the OAuth the MCP spec expects, AWS ships [`mcp-proxy-for-aws`](https://github.com/aws/mcp-proxy-for-aws), an official local bridge process that signs requests with your existing AWS credentials and forwards them to the remote server. It's launched automatically via `uvx` — this replaces `app/s3/mcp_server.py` (kept in-repo for reference), so no S3 logic runs locally anymore. Requires `uv`/`uvx` on PATH (`pip install uv` or see [astral.sh/uv](https://astral.sh/uv)).
+
+Auth reuses the same AWS credentials as before:
+
+```
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_DEFAULT_REGION=us-east-1
+```
+
+S3 tools activate when the two AWS credential vars above are set and `ENABLE_TOOLS=true`. Optional overrides: `AWS_MCP_ENDPOINT` (defaults to `https://aws-mcp.us-east-1.api.aws/mcp`; AWS also runs one in `eu-central-1`), `AWS_MCP_REGION` (region passed to the proxy, defaults to `AWS_DEFAULT_REGION`), `AWS_MCP_READ_ONLY` (defaults to `true`, matching the read-only scope of the old `list_buckets`/`list_objects`/`get_object` tools). Note the tool surface changes from those S3-specific tool names to a single generic `call_aws` tool the model uses to invoke any AWS API action — not S3-only anymore, so IAM permissions should be scoped accordingly if you want to keep access limited to S3.
+
+### ClickHouse setup
+
+ClickHouse tools go through [ClickHouse Cloud's own remote MCP server](https://clickhouse.com/docs/cloud/features/ai-ml/remote-mcp) (currently in private preview) at a single global endpoint, reached directly over streamable HTTP — no local process is started. It must be enabled per-service first: in the ClickHouse Cloud console, open your service, click **Connect**, select **MCP**, and enable it. It exposes `run_select_query`, `list_databases` and `list_tables` (with column definitions) covering the same ground as the old local tools, plus extra service/backup/billing management tools; there's no exact `describe_table` equivalent, though `list_tables`' column definitions cover most of that need.
+
+Unlike Databricks (PAT) or your existing `CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD`, ClickHouse Cloud's remote MCP server **only supports interactive OAuth 2.0** — there's no API key option. So, same as Jira, one-time setup:
+
+```bash
+python scripts/setup_clickhouse_auth.py
+```
+
+This opens your browser for the ClickHouse Cloud consent screen and saves the resulting tokens to `CLICKHOUSE_TOKEN_PATH` (default `data/mcp_tokens/clickhouse.json`). The running app only loads and refreshes these tokens — it never does the interactive login itself, so re-run this script if the refresh token is ever revoked. Access is scoped to whatever organizations/services your ClickHouse Cloud login can see, so `CLICKHOUSE_URL`/`CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD`/`CLICKHOUSE_DATABASE` are no longer used for MCP (they're still used directly by `scripts/seed_jira_mock.py`).
 
 ### Known limitation: `--reload`
 
