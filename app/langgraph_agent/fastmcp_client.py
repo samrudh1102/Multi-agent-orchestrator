@@ -1,7 +1,14 @@
-"""MCP client to Jira (Atlassian's hosted remote MCP server) and TestRail (a
-self-hosted community stdio server), plus the S3/Redshift/ClickHouse/Airflow/
-Databricks stdio servers, exposed as LangChain tools for the LangGraph agent
-(app/langgraph_agent/graph_agent.py).
+"""MCP client to Jira (Atlassian's hosted remote MCP server), Databricks
+(Databricks' own hosted remote MCP server), S3 (AWS's official remote MCP
+Server, reached via AWS's mcp-proxy-for-aws bridge), and ClickHouse
+(ClickHouse Cloud's own hosted remote MCP server), plus the TestRail/
+Redshift/Airflow local stdio servers, exposed as LangChain tools for the
+LangGraph agent (app/langgraph_agent/graph_agent.py).
+
+S3, Databricks and ClickHouse used to run as local stdio servers
+(app/s3/mcp_server.py, app/databricks/mcp_server.py,
+app/clickhouse/mcp_server.py); those files are kept in the repo for
+reference but are no longer launched — see _build_config below.
 
 Backed by langchain-mcp-adapters' MultiServerMCPClient: it takes a single
 multi-server `connections` config and its `get_tools()` returns ready-made
@@ -9,12 +16,14 @@ LangChain tools (a fresh MCP session is opened per tool call), with each
 server's tool names prefixed by server (e.g. `jira_getJiraIssue`,
 `testrail_getCase`) so calls route back to the right server automatically.
 
-Jira auth: scripts/setup_jira_auth.py is a one-time interactive login that
-persists an access + refresh token pair to settings.jira_token_file. The
-running app reuses that same OAuthClientProvider/FileTokenStorage pairing as
-its httpx auth, so it transparently refreshes the access token (Atlassian's
-expire hourly) using the stored refresh token instead of needing the script
-re-run. Re-running the script is only needed if the refresh token itself is
+Jira and ClickHouse auth follow the same pattern: scripts/setup_jira_auth.py
+/ scripts/setup_clickhouse_auth.py are one-time interactive logins that
+persist an access + refresh token pair to settings.jira_token_file /
+settings.clickhouse_token_file. The running app reuses that same
+OAuthClientProvider/FileTokenStorage pairing as its httpx auth, so it
+transparently refreshes the access token using the stored refresh token
+instead of needing the script re-run. Re-running the script is only needed
+if the refresh token itself is
 revoked or expired.
 
 Only used when settings.enable_tools is true."""
@@ -80,21 +89,59 @@ class FileTokenStorage(TokenStorage):
         self._write(data)
 
 
-async def _refused_redirect(url: str) -> None:
-    # The running app must never block on an interactive browser consent
-    # flow; that only happens once, via scripts/setup_jira_auth.py. If we get
-    # here, the stored refresh token was rejected and a human needs to log in
-    # again.
-    raise RuntimeError(
-        "Jira OAuth requires interactive re-authorization. "
-        "Run scripts/setup_jira_auth.py to log in again."
+def _refuse_interactive_auth(service: str, script: str):
+    """The running app must never block on an interactive browser consent
+    flow; that only happens once, via the given setup script. If these are
+    invoked, the stored refresh token was rejected and a human needs to log
+    in again."""
+
+    async def _redirect(url: str) -> None:
+        raise RuntimeError(f"{service} OAuth requires interactive re-authorization. Run {script} to log in again.")
+
+    async def _callback() -> tuple[str, str | None]:
+        raise RuntimeError(f"{service} OAuth requires interactive re-authorization. Run {script} to log in again.")
+
+    return _redirect, _callback
+
+
+_refused_redirect, _refused_callback = _refuse_interactive_auth("Jira", "scripts/setup_jira_auth.py")
+_clickhouse_refused_redirect, _clickhouse_refused_callback = _refuse_interactive_auth(
+    "ClickHouse Cloud", "scripts/setup_clickhouse_auth.py"
+)
+
+
+CLICKHOUSE_REDIRECT_URI = "http://localhost:8766/callback"
+
+
+def clickhouse_client_metadata() -> OAuthClientMetadata:
+    return OAuthClientMetadata(
+        redirect_uris=[CLICKHOUSE_REDIRECT_URI],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        client_name="rag-chatbot",
     )
 
 
-async def _refused_callback() -> tuple[str, str | None]:
-    raise RuntimeError(
-        "Jira OAuth requires interactive re-authorization. "
-        "Run scripts/setup_jira_auth.py to log in again."
+def _clickhouse_auth() -> OAuthClientProvider | None:
+    """Build an auth handler backed by the tokens scripts/setup_clickhouse_auth.py
+    persisted, same FileTokenStorage pairing as Jira so the access token is
+    transparently refreshed."""
+    path = settings.clickhouse_token_file
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Could not read ClickHouse token file %s", path)
+        return None
+    if not data.get("tokens"):
+        return None
+    return OAuthClientProvider(
+        server_url=settings.clickhouse_mcp_url,
+        client_metadata=clickhouse_client_metadata(),
+        storage=FileTokenStorage(path),
+        redirect_handler=_clickhouse_refused_redirect,
+        callback_handler=_clickhouse_refused_callback,
     )
 
 
@@ -159,18 +206,33 @@ def _build_config() -> dict[str, Any]:
             "TestRail tools will be unavailable."
         )
     if settings.aws_access_key_id and settings.aws_secret_access_key:
-            servers["s3"] = {
-                "transport": "stdio",
-                "command": settings.s3_mcp_command,
-                "args": settings.s3_mcp_args,
-                "env": {
-                    "AWS_ACCESS_KEY_ID": settings.aws_access_key_id,
-                    "AWS_SECRET_ACCESS_KEY": settings.aws_secret_access_key,
-                    "AWS_DEFAULT_REGION": settings.aws_default_region or "us-east-1",
-                },
-            }
-  
-        
+        # AWS's official remote MCP Server only speaks OAuth+SigV4, which no
+        # generic MCP client (including MultiServerMCPClient) can do natively.
+        # AWS's own fix is mcp-proxy-for-aws: a local stdio bridge that signs
+        # requests with our existing AWS creds and forwards them to the real
+        # remote server (aws_mcp_endpoint). No S3 logic runs locally anymore;
+        # this replaces app/s3/mcp_server.py entirely.
+        proxy_args = [settings.aws_mcp_proxy_package, settings.aws_mcp_endpoint]
+        region = settings.aws_mcp_region or settings.aws_default_region or "us-east-1"
+        proxy_args += ["--region", region]
+        if settings.aws_mcp_read_only:
+            proxy_args.append("--read-only")
+        servers["s3"] = {
+            "transport": "stdio",
+            "command": settings.aws_mcp_proxy_command,
+            "args": proxy_args,
+            "env": {
+                "AWS_ACCESS_KEY_ID": settings.aws_access_key_id,
+                "AWS_SECRET_ACCESS_KEY": settings.aws_secret_access_key,
+                "AWS_DEFAULT_REGION": region,
+            },
+        }
+    else:
+        logger.warning(
+            "AWS is not fully configured (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY); "
+            "S3 tools will be unavailable."
+        )
+
     if settings.aws_access_key_id and settings.aws_secret_access_key and settings.redshift_database:
         servers["redshift"] = {
             "transport": "stdio",
@@ -188,19 +250,25 @@ def _build_config() -> dict[str, Any]:
             },
         }
  
-    if settings.clickhouse_url:
+    # ClickHouse Cloud's own remote MCP server (single global endpoint,
+    # OAuth 2.0 only — no API key/password auth). This replaces
+    # app/clickhouse/mcp_server.py, which used clickhouse_url/user/password
+    # directly; those REST creds are unused for MCP now but still power
+    # scripts/seed_jira_mock.py.
+    clickhouse_auth = _clickhouse_auth()
+    if clickhouse_auth:
         servers["clickhouse"] = {
-            "transport": "stdio",
-            "command": settings.clickhouse_mcp_command,
-            "args": settings.clickhouse_mcp_args,
-            "env": {
-                "CLICKHOUSE_URL": settings.clickhouse_url,
-                "CLICKHOUSE_USER": settings.clickhouse_user or "default",
-                "CLICKHOUSE_PASSWORD": settings.clickhouse_password or "",
-                "CLICKHOUSE_DATABASE": settings.clickhouse_database or "default",
-            },
+            "transport": "streamable_http",
+            "url": settings.clickhouse_mcp_url,
+            "auth": clickhouse_auth,
         }
- 
+    else:
+        logger.warning(
+            "No ClickHouse Cloud access token found at %s; ClickHouse tools will be unavailable. "
+            "Run scripts/setup_clickhouse_auth.py to authenticate.",
+            settings.clickhouse_token_file,
+        )
+
     if settings.airflow_url:
         servers["airflow"] = {
             "transport": "stdio",
@@ -214,15 +282,17 @@ def _build_config() -> dict[str, Any]:
         }
 
     if settings.databricks_host and settings.databricks_token:
+        # Databricks' own managed remote MCP server for SQL Warehouses
+        # (https://<workspace>/api/2.0/mcp/sql), reached directly over
+        # streamable_http with the same PAT used before, sent as a bearer
+        # header. This replaces app/databricks/mcp_server.py; note the
+        # managed endpoint only exposes SQL query tools (execute_sql/
+        # poll_response) — there is no remote equivalent for the Jobs API,
+        # so list_jobs/trigger_job are no longer available.
         servers["databricks"] = {
-            "transport": "stdio",
-            "command": settings.databricks_mcp_command,
-            "args": settings.databricks_mcp_args,
-            "env": {
-                "DATABRICKS_HOST": settings.databricks_host,
-                "DATABRICKS_TOKEN": settings.databricks_token,
-                "DATABRICKS_WAREHOUSE_ID": settings.databricks_warehouse_id or "",
-            },
+            "transport": "streamable_http",
+            "url": settings.databricks_mcp_url,
+            "headers": {"Authorization": f"Bearer {settings.databricks_token}"},
         }
     else:
         logger.warning(
