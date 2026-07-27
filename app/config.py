@@ -146,6 +146,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
 
     @property
+    
     def upload_path(self) -> Path:
         p = Path(self.upload_dir)
         p.mkdir(parents=True, exist_ok=True)
