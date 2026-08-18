@@ -18,9 +18,9 @@ import requests
 import streamlit as st
 
 DEFAULT_API_URL = os.environ.get("RAG_API_URL", "http://localhost:8000")
-REQUEST_TIMEOUT = 120  # generous: embedding + LLM (+ possible tool calls) can be slow
+REQUEST_TIMEOUT = 1000  # generous: embedding + LLM (+ possible tool calls) can be slow
 
-st.set_page_config(page_title="RAG Chatbot", page_icon="💬", layout="wide")
+st.set_page_config(page_title="AI Assistant", page_icon="💬", layout="wide")
 
 
 # --------------------------------------------------------------------------- #
@@ -216,7 +216,7 @@ with st.sidebar:
 # --------------------------------------------------------------------------- #
 # Main: chat
 # --------------------------------------------------------------------------- #
-st.title("💬 RAG Chatbot")
+st.title("💬 AI Assistant")
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):

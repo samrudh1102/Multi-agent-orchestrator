@@ -5,16 +5,25 @@ Server, reached via AWS's mcp-proxy-for-aws bridge), and ClickHouse
 Redshift/Airflow local stdio servers, exposed as LangChain tools for the
 LangGraph agent (app/langgraph_agent/graph_agent.py).
 
+Postgres and Grafana have no vendor-hosted remote MCP endpoint for a generic
+instance, so they're launched the same way as S3: the official/community
+package (postgres-mcp, mcp-grafana) run as a local stdio subprocess via uvx,
+rather than a hand-written app/*/mcp_server.py.
+
 S3, Databricks and ClickHouse used to run as local stdio servers
 (app/s3/mcp_server.py, app/databricks/mcp_server.py,
 app/clickhouse/mcp_server.py); those files are kept in the repo for
 reference but are no longer launched — see _build_config below.
 
 Backed by langchain-mcp-adapters' MultiServerMCPClient: it takes a single
-multi-server `connections` config and its `get_tools()` returns ready-made
-LangChain tools (a fresh MCP session is opened per tool call), with each
-server's tool names prefixed by server (e.g. `jira_getJiraIssue`,
-`testrail_getCase`) so calls route back to the right server automatically.
+multi-server `connections` config, with each server's tool names prefixed by
+server (e.g. `jira_getJiraIssue`, `testrail_getCase`) so calls route back to
+the right server automatically. get_tools() opens a fresh MCP session (and,
+for stdio servers, a fresh subprocess) per tool call — costly for both the
+remote streamable_http servers (a full OAuth handshake for jira/clickhouse)
+and the local stdio ones (uvx package resolve + Python startup per call), so
+every configured server instead gets one session held open for the app's
+lifetime — see FastMCPToolProvider.connect below.
 
 Jira and ClickHouse auth follow the same pattern: scripts/setup_jira_auth.py
 / scripts/setup_clickhouse_auth.py are one-time interactive logins that
@@ -29,10 +38,14 @@ revoked or expired.
 Only used when settings.enable_tools is true."""
 import json
 import logging
+import os
+import time
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
@@ -170,6 +183,34 @@ def _jira_auth() -> OAuthClientProvider | None:
     )
 
 
+# mcp.client.stdio.get_default_environment() only inherits a small
+# allowlist (HOME/LOGNAME/PATH/SHELL/TERM/USER on Unix) into local stdio
+# server subprocesses, for security. That strips SSL_CERT_FILE, so those
+# subprocesses fall back to their own certifi bundle instead of the OS trust
+# store — unlike this process, which trusts the OS store via
+# truststore.inject_into_ssl() in app/main.py. On networks where a corporate
+# TLS-inspecting proxy issues a root CA that's only in the OS store (not
+# certifi), that mismatch surfaces as CERTIFICATE_VERIFY_FAILED when a stdio
+# server (or an aws_mcp_proxy_command like uvx fetching its package) makes an
+# outbound HTTPS call. Explicitly forward a CA bundle to fix it.
+_SYSTEM_CA_BUNDLES = (
+    "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
+    "/etc/pki/tls/certs/ca-bundle.crt",  # RHEL/Fedora
+    "/etc/ssl/cert.pem",  # macOS/Alpine
+)
+
+
+def _stdio_env(env: dict[str, str]) -> dict[str, str]:
+    """Extend a stdio MCP server's env with a CA bundle so it can make
+    outbound HTTPS calls on networks with a locally-trusted proxy CA."""
+    cert_file = os.environ.get("SSL_CERT_FILE") or next(
+        (path for path in _SYSTEM_CA_BUNDLES if Path(path).is_file()), None
+    )
+    if cert_file:
+        env = {**env, "SSL_CERT_FILE": cert_file, "REQUESTS_CA_BUNDLE": cert_file}
+    return env
+
+
 def _build_config() -> dict[str, Any]:
     """Assemble a MultiServerMCPClient `connections` config from settings.
     Servers that are not configured/authenticated are simply omitted."""
@@ -194,11 +235,11 @@ def _build_config() -> dict[str, Any]:
             "transport": "stdio",
             "command": settings.testrail_mcp_command,
             "args": settings.testrail_mcp_args,
-            "env": {
+            "env": _stdio_env({
                 "TESTRAIL_URL": settings.testrail_url,
                 "TESTRAIL_USERNAME": settings.testrail_username,
                 "TESTRAIL_API_KEY": settings.testrail_api_key,
-            },
+            }),
         }
     else:
         logger.warning(
@@ -249,7 +290,31 @@ def _build_config() -> dict[str, Any]:
                 "REDSHIFT_SECRET_ARN": settings.redshift_secret_arn or "",
             },
         }
- 
+
+    postgres_uri = settings.postgres_mcp_uri
+    if postgres_uri:
+        # Our own local FastMCP server (app/postgres/mcp_server.py), run as a
+        # stdio subprocess with the same interpreter as the app -- same
+        # pattern as TestRail/Airflow above. postgres_mcp_uri builds a DSN
+        # from PGHOST/PGUSER/PGPASSWORD/PGDATABASE if postgres_database_uri
+        # isn't set directly.
+        servers["postgres"] = {
+            "transport": "stdio",
+            "command": settings.postgres_mcp_command,
+            "args": settings.postgres_mcp_args,
+            "env": _stdio_env(
+                {
+                    "DATABASE_URI": postgres_uri,
+                    "POSTGRES_MCP_ACCESS_MODE": settings.postgres_mcp_access_mode,
+                }
+            ),
+        }
+    else:
+        logger.warning(
+            "Postgres is not fully configured (PGHOST/PGUSER/PGPASSWORD/PGDATABASE "
+            "or POSTGRES_DATABASE_URI); Postgres tools will be unavailable."
+        )
+
     # ClickHouse Cloud's own remote MCP server (single global endpoint,
     # OAuth 2.0 only — no API key/password auth). This replaces
     # app/clickhouse/mcp_server.py, which used clickhouse_url/user/password
@@ -269,6 +334,28 @@ def _build_config() -> dict[str, Any]:
             settings.clickhouse_token_file,
         )
 
+    grafana_token = settings.grafana_mcp_token
+    if settings.grafana_url and grafana_token:
+        # Grafana Labs' official open-source MCP server (grafana/mcp-grafana).
+        # No vendor-hosted remote endpoint exists for a generic Grafana
+        # instance, so — like Postgres/S3 above — the official package is
+        # launched as a local stdio subprocess via uvx instead of hand-writing
+        # tools against Grafana's REST API.
+        servers["grafana"] = {
+            "transport": "stdio",
+            "command": settings.grafana_mcp_command,
+            "args": [settings.grafana_mcp_package],
+            "env": _stdio_env({
+                "GRAFANA_URL": settings.grafana_url,
+                "GRAFANA_SERVICE_ACCOUNT_TOKEN": grafana_token,
+            }),
+        }
+    else:
+        logger.warning(
+            "Grafana is not fully configured (GRAFANA_URL/GRAFANA_API_TOKEN); "
+            "Grafana tools will be unavailable."
+        )
+
     if settings.airflow_url:
         servers["airflow"] = {
             "transport": "stdio",
@@ -278,6 +365,7 @@ def _build_config() -> dict[str, Any]:
                 "AIRFLOW_URL": settings.airflow_url,
                 "AIRFLOW_USERNAME": settings.airflow_username or "",
                 "AIRFLOW_PASSWORD": settings.airflow_password or "",
+                "AIRFLOW_TOKEN": settings.airflow_token or "",
             },
         }
 
@@ -304,6 +392,59 @@ def _build_config() -> dict[str, Any]:
     return servers
 
 
+# Strict exact-match allowlist of the only tools the agent may ever call.
+# Binding the full ~114-tool catalog (every list/get/query/search/describe
+# tool across every configured server, plus every write/trigger/delete tool)
+# made bind_tools() slow and left the agent able to reach destructive or
+# exploratory-discovery tools it was never meant to use. Anything not named
+# here — including read-shaped tools like `postgres_list_tables` or
+# `clickhouse_get_organizations` — is dropped. Names are post-prefix
+# ("{server}_{toolName}", tool_name_prefix=True in _build_config), matching
+# what load_mcp_tools actually produces. Adding a new tool requires adding
+# its exact name here, on purpose.
+STRICT_TOOL_ALLOWLIST: set[str] = {
+    # ClickHouse (1 tool - direct SQL only)
+    "clickhouse_run_select_query",
+
+    # Jira (2 tools)
+    "jira_searchJiraIssuesUsingJql",
+    "jira_getJiraIssue",
+
+    # PostgreSQL (2 tools)
+    "postgres_query",
+    "postgres_describe_table",
+
+    # Databricks (2 tools)
+    "databricks_execute_sql",
+    "databricks_poll_response",
+
+    # Airflow (3 tools)
+    "airflow_list_dags",
+    "airflow_list_dag_runs",
+    "airflow_get_task_logs",
+
+    # TestRail (5 tools)
+    "testrail_get_projects",
+    "testrail_get_runs",
+    "testrail_get_tests",
+    "testrail_get_results",
+    "testrail_get_cases",
+
+    # S3 (2 tools)
+    "s3_list_objects",
+    "s3_get_object",
+
+    # Grafana (3 tools)
+    "grafana_get_dashboard_by_uid",
+    "grafana_search_dashboards",
+    "grafana_get_panel_data",
+
+    # Redshift (2 tools)
+    "redshift_query",
+    "redshift_describe_table",
+}
+
+
 class FastMCPToolProvider:
     """Owns one MultiServerMCPClient for the app's lifetime and the LangChain
     tools it exposes across all configured MCP servers."""
@@ -311,6 +452,7 @@ class FastMCPToolProvider:
     def __init__(self) -> None:
         self._client: MultiServerMCPClient | None = None
         self._tools: list[BaseTool] = []
+        self._exit_stack: AsyncExitStack | None = None
 
     async def connect(self) -> None:
         connections = _build_config()
@@ -318,17 +460,42 @@ class FastMCPToolProvider:
             logger.warning("No MCP servers configured; LangGraph agent will run with no tools.")
             return
 
-        # MultiServerMCPClient opens a fresh MCP session per tool call, so there
-        # is no long-lived connection to enter/exit — the client is just the
-        # config holder. tool_name_prefix=True prefixes each tool with its
-        # server name (e.g. `jira_getJiraIssue`) so names stay unique and route
-        # back to the right server.
+        logger.info("MultiServerMCPClient connecting to servers: %s", sorted(connections))
+        t0 = time.monotonic()
         self._client = MultiServerMCPClient(connections, tool_name_prefix=True)
-        self._tools = await self._client.get_tools()
+        self._exit_stack = AsyncExitStack()
+
+        # Every configured server (streamable_http and stdio alike) gets one
+        # session held open for the app's lifetime. get_tools() opens a fresh
+        # MCP session (and, for stdio, a fresh subprocess) per tool call —
+        # cheap for remote streamable_http servers but multi-second per call
+        # for stdio ones launched via uvx (package resolve + Python startup),
+        # which dominated end-to-end latency. Holding one session per server
+        # open avoids paying that cost on every single tool invocation.
+        tools: list[BaseTool] = []
+        for name in connections:
+            session = await self._exit_stack.enter_async_context(self._client.session(name))
+            tools.extend(await load_mcp_tools(
+                session,
+                callbacks=self._client.callbacks,
+                tool_interceptors=self._client.tool_interceptors,
+                server_name=name,
+                tool_name_prefix=True,
+                handle_tool_errors=self._client.handle_tool_errors,
+            ))
+        loaded_count = len(tools)
+        self._tools = [t for t in tools if t.name in STRICT_TOOL_ALLOWLIST]
+        elapsed = time.monotonic() - t0
+
+        per_server_counts: dict[str, int] = {}
+        for t in self._tools:
+            server = t.name.split("_", 1)[0]
+            per_server_counts[server] = per_server_counts.get(server, 0) + 1
+
         logger.info(
-            "MultiServerMCPClient connected: %d tool(s) available: %s",
-            len(self._tools),
-            ", ".join(t.name for t in self._tools) or "(none)",
+            "MultiServerMCPClient connected in %.2fs: %d/%d tool(s) allowed after strict "
+            "allowlist filtering, per server: %s",
+            elapsed, len(self._tools), loaded_count, per_server_counts,
         )
 
     @property
@@ -336,7 +503,9 @@ class FastMCPToolProvider:
         return self._tools
 
     async def disconnect(self) -> None:
-        # Sessions are per-call and closed automatically; nothing to tear down.
+        if self._exit_stack is not None:
+            await self._exit_stack.aclose()
+        self._exit_stack = None
         self._client = None
         self._tools = []
 

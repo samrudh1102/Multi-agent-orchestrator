@@ -81,6 +81,10 @@ Then create a `.env` file in the project root (it's git-ignored — never commit
 | `AWS_MCP_REGION` | `AWS_DEFAULT_REGION` | Region passed to `mcp-proxy-for-aws`; separate from `AWS_DEFAULT_REGION` in case your S3 buckets live in a different region than the MCP endpoint |
 | `AWS_MCP_READ_ONLY` | `true` | Disable write-capable AWS tools in `mcp-proxy-for-aws` |
 | `REDSHIFT_DATABASE` / `REDSHIFT_WORKGROUP_NAME` | — | Redshift Serverless target |
+| `PGHOST` / `PGPORT` / `PGUSER` / `PGPASSWORD` / `PGDATABASE` | — | RDS Postgres connection (same vars `data/out_postgres/load_postgres.sh` uses); built into a DSN for `postgres-mcp` (see [Postgres setup](#postgres-setup)) |
+| `POSTGRES_DATABASE_URI` | — | Full Postgres DSN override; takes priority over the `PG*` vars above |
+| `POSTGRES_MCP_ACCESS_MODE` | `restricted` | `restricted` (read-only) or `unrestricted` (allows writes) |
+| `GRAFANA_URL` / `GRAFANA_API_TOKEN` | — | Grafana instance + service account token (same vars `data/out_grafana/load_grafana.sh` uses) for `mcp-grafana` (see [Grafana setup](#grafana-setup)) |
 | `CLICKHOUSE_URL` / `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | — | ClickHouse Cloud REST connection; no longer used for MCP, only by `scripts/seed_jira_mock.py` |
 | `CLICKHOUSE_MCP_URL` | `https://mcp.clickhouse.cloud/mcp` | ClickHouse Cloud's official remote MCP Server endpoint (see [ClickHouse setup](#clickhouse-setup)) |
 | `CLICKHOUSE_TOKEN_PATH` | `data/mcp_tokens/clickhouse.json` | Where ClickHouse Cloud OAuth tokens are stored |
@@ -140,9 +144,9 @@ Debug endpoint (only enabled when `ENABLE_TOOLS=true`): lists the MCP tools curr
 ### `GET /health`
 Basic liveness check.
 
-## MCP tool integration (Jira, TestRail, Databricks, S3, ClickHouse, ...)
+## MCP tool integration (Jira, TestRail, Databricks, S3, ClickHouse, Postgres, Grafana, ...)
 
-Beyond document RAG, the chatbot can call out to live Jira, TestRail, Databricks, S3, ClickHouse and other data via [MCP](https://modelcontextprotocol.io) tools, gated behind `ENABLE_TOOLS` in `.env`. This is additive — document retrieval keeps working as before, and tool-calling is implemented against Gemini.
+Beyond document RAG, the chatbot can call out to live Jira, TestRail, Databricks, S3, ClickHouse, Postgres, Grafana and other data via [MCP](https://modelcontextprotocol.io) tools, gated behind `ENABLE_TOOLS` in `.env`. This is additive — document retrieval keeps working as before, and tool-calling is implemented against Gemini.
 
 The implementation (`app/langgraph_agent/`) retrieves RAG context first, then lets the LLM decide per turn whether to call an MCP tool or answer directly from context. A [FastMCP](https://gofastmcp.com)/`langchain-mcp-adapters` client (`fastmcp_client.py`) connects to all configured servers and exposes their tools as LangChain tools, driven by a LangGraph `StateGraph` (`graph_agent.py`): `START → agent → tools_condition → tools → agent → … → END`. The `agent` node runs `get_tool_chat_model()` (`app/llm.py`), a Gemini chat model bound to the MCP tools via `bind_tools()`. Jira, ClickHouse and Databricks auth are sent as bearer headers/OAuth; S3 auth is handled by AWS's own signing proxy (see below).
 
@@ -219,6 +223,20 @@ python scripts/setup_clickhouse_auth.py
 ```
 
 This opens your browser for the ClickHouse Cloud consent screen and saves the resulting tokens to `CLICKHOUSE_TOKEN_PATH` (default `data/mcp_tokens/clickhouse.json`). The running app only loads and refreshes these tokens — it never does the interactive login itself, so re-run this script if the refresh token is ever revoked. Access is scoped to whatever organizations/services your ClickHouse Cloud login can see, so `CLICKHOUSE_URL`/`CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD`/`CLICKHOUSE_DATABASE` are no longer used for MCP (they're still used directly by `scripts/seed_jira_mock.py`).
+
+### Postgres setup
+
+Postgres has no single vendor and no hosted remote MCP endpoint for a generic instance (Neon/Supabase run their own, but those are scoped to databases hosted on their platforms, not arbitrary Postgres). The original reference server, `@modelcontextprotocol/server-postgres`, was archived after a SQL-injection vulnerability — **do not use it**. This repo instead launches [`crystaldba/postgres-mcp`](https://github.com/crystaldba/postgres-mcp) ("Postgres MCP Pro"), the actively maintained community server, as a local stdio subprocess via `uvx` — same pattern as the S3 bridge above. It exposes query/schema-browsing tools plus index-tuning and health-check tools. Requires `uv`/`uvx` on PATH.
+
+Reuses the same `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` vars already set for `data/out_postgres/load_postgres.sh` — `app/config.py` builds a `postgresql://` DSN from them. Set `POSTGRES_DATABASE_URI` directly instead if you'd rather not decompose it into `PG*` vars, or if it's a different Postgres than the RDS instance those vars point at.
+
+Postgres tools activate once a DSN can be built (either the `PG*` vars or `POSTGRES_DATABASE_URI`) and `ENABLE_TOOLS=true`. `POSTGRES_MCP_ACCESS_MODE` defaults to `restricted` (read-only transactions only); set it to `unrestricted` to also allow writes.
+
+### Grafana setup
+
+Grafana Labs publishes only an open-source server, [`grafana/mcp-grafana`](https://github.com/grafana/mcp-grafana) — there's no vendor-hosted remote endpoint for a generic instance (self-hosted or Grafana Cloud). It's launched as a local stdio subprocess via `uvx`, exposing tools to search/query dashboards, datasources, and alerts. Requires `uv`/`uvx` on PATH.
+
+Reuses the same `GRAFANA_URL`/`GRAFANA_API_TOKEN` vars already set for `data/out_grafana/load_grafana.sh` (a service account token from **Administration → Service accounts** in Grafana). Set `GRAFANA_SERVICE_ACCOUNT_TOKEN` instead if you want a separate token scoped to MCP specifically. Grafana tools activate once `GRAFANA_URL` and one of those tokens are set and `ENABLE_TOOLS=true`.
 
 ### Known limitation: `--reload`
 

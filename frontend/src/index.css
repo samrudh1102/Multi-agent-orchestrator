@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import 'highlight.js/styles/atom-one-dark.css';
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Markdown Styling Overrides */
+.prose-custom table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  border: 1px solid #1e293b;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.prose-custom th {
+  background-color: #161f33;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: #94a3b8;
+  border-bottom: 1px solid #1e293b;
+}
+
+.prose-custom td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #1e293b;
+  color: #e2e8f0;
+}
+
+.prose-custom tr:last-child td {
+  border-bottom: none;
+}
+
+.prose-custom tr:nth-child(even) {
+  background-color: rgba(22, 31, 51, 0.4);
+}
+
+.prose-custom pre {
+  background: #0e1320 !important;
+  border: 1px solid #1e293b;
+  border-radius: 0.5rem;
+  padding: 0.875rem;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+
+.prose-custom code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.825rem;
+}
+
+.prose-custom p:not(:last-child) {
+  margin-bottom: 0.75rem;
+}
