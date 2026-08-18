@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -7,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _TESTRAIL_MCP_SERVER = Path(__file__).resolve().parent / "testrail" / "mcp_server.py"
 _REDSHIFT_MCP_SERVER = Path(__file__).resolve().parent / "redshift" / "mcp_server.py"
 _AIRFLOW_MCP_SERVER = Path(__file__).resolve().parent / "airflow" / "mcp_server.py"
+_POSTGRES_MCP_SERVER = Path(__file__).resolve().parent / "postgres" / "mcp_server.py"
 # NOTE: app/s3/mcp_server.py, app/databricks/mcp_server.py and
 # app/clickhouse/mcp_server.py still exist for reference but are no longer
 # launched — S3, Databricks and ClickHouse now go through their vendors'
@@ -43,18 +45,24 @@ class Settings(BaseSettings):
     upload_dir: str = "data/uploads"
     index_dir: str = "data/index"
 
-    max_new_tokens: int = 1545
+    max_new_tokens: int = 10000
     temperature: float = 0.3
 
     # -------------------------------------------------------------------------
     # MCP Tool Integration
     # -------------------------------------------------------------------------
 
-    enable_tools: bool = False
-    max_tool_iterations: int = 5
+    enable_tools: bool = True
+    max_tool_iterations: int = 100
 
     # Gemini will be used for tool calling as well
     tool_model_name: str = "gemini-3.1-flash-lite"
+
+    # When false (default), the verbose print() tracing in graph_agent.py
+    # (agent_node/tools_node) is suppressed. Logger calls (logging.info/
+    # .warning) are unaffected — those already go through normal log
+    # levels/handlers.
+    debug_agent_logging: bool = False
 
     # -------------------------------------------------------------------------
     # Jira MCP
@@ -116,6 +124,31 @@ class Settings(BaseSettings):
     redshift_db_user: str | None = None
     redshift_secret_arn: str | None = None
 
+    # -------------------------------------------------------------------------
+    # Postgres MCP -- our own local FastMCP server (app/postgres/mcp_server.py),
+    # run over stdio with the same interpreter as the app (same pattern as
+    # TestRail/Airflow above). Previously this launched the external
+    # crystaldba/postgres-mcp package via uvx; switched to a local server so
+    # connection failures (e.g. an unreachable RDS instance) surface directly
+    # in our own logs instead of an opaque third-party subprocess.
+    # -------------------------------------------------------------------------
+
+    postgres_mcp_command: str = sys.executable
+    postgres_mcp_args: list[str] = [str(_POSTGRES_MCP_SERVER)]
+    # restricted = read-only queries only; unrestricted also permits writes.
+    postgres_mcp_access_mode: str = "restricted"
+
+    # PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE are the same RDS creds already
+    # used by data/out_postgres/load_postgres.sh; postgres_mcp_uri below builds
+    # a DSN from them so nothing needs to be duplicated in .env. Set
+    # postgres_database_uri directly to override (e.g. a non-RDS Postgres).
+    pghost: str | None = None
+    pgport: int = 5432
+    pguser: str | None = None
+    pgpassword: str | None = None
+    pgdatabase: str | None = None
+    postgres_database_uri: str | None = None
+
     # ClickHouse MCP
     # -------------------------------------------------------------------------
 
@@ -138,6 +171,23 @@ class Settings(BaseSettings):
     clickhouse_token_path: str = "data/mcp_tokens/clickhouse.json"
 
     # -------------------------------------------------------------------------
+    # Grafana MCP (Grafana Labs' official open-source mcp-grafana server —
+    # there is no vendor-hosted remote MCP endpoint for a generic Grafana
+    # instance, so this is run locally via uvx, same pattern as Postgres/S3
+    # above).
+    # -------------------------------------------------------------------------
+
+    grafana_mcp_command: str = "uvx"
+    grafana_mcp_package: str = "mcp-grafana"
+
+    grafana_url: str | None = None
+    # GRAFANA_API_TOKEN is the same service account token already used by
+    # data/out_grafana/load_grafana.sh. grafana_service_account_token can be
+    # set instead/additionally to override it for MCP specifically.
+    grafana_api_token: str | None = None
+    grafana_service_account_token: str | None = None
+
+    # -------------------------------------------------------------------------
     # Airflow MCP
     # -------------------------------------------------------------------------
 
@@ -150,6 +200,10 @@ class Settings(BaseSettings):
     airflow_url: str | None = None
     airflow_username: str | None = None
     airflow_password: str | None = None
+    # Optional: a token copied from the Airflow UI (profile page -> API Token).
+    # Valid ~24h. If set, this is used directly and airflow_username/password
+    # (the /auth/token flow) are ignored.
+    airflow_token: str | None = None
 
     # -------------------------------------------------------------------------
     # Databricks MCP (Databricks' own managed remote MCP server, reached over
@@ -198,6 +252,20 @@ class Settings(BaseSettings):
         p = Path(self.jira_token_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
+
+    @property
+    def postgres_mcp_uri(self) -> str | None:
+        if self.postgres_database_uri:
+            return self.postgres_database_uri
+        if self.pghost and self.pguser and self.pgpassword and self.pgdatabase:
+            user = quote(self.pguser, safe="")
+            password = quote(self.pgpassword, safe="")
+            return f"postgresql://{user}:{password}@{self.pghost}:{self.pgport}/{self.pgdatabase}"
+        return None
+
+    @property
+    def grafana_mcp_token(self) -> str | None:
+        return self.grafana_service_account_token or self.grafana_api_token
 
 
 settings = Settings()

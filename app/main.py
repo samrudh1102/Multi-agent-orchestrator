@@ -7,7 +7,7 @@ import shutil
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-
+import traceback
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -19,11 +19,20 @@ from app.langgraph_agent import graph_agent
 from app.langgraph_agent.fastmcp_client import fastmcp_provider
 from app.schemas import ChatRequest, ChatResponse, DocumentInfo, UploadResponse
 
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.enable_tools:
         await fastmcp_provider.connect()
+        # Pay the multi-second bind_tools() cost (see graph_agent.warm_up)
+        # now, at startup, instead of on whichever request happens to hit it
+        # first.
+        await asyncio.to_thread(graph_agent.warm_up)
     yield
     if settings.enable_tools:
         await fastmcp_provider.disconnect()
@@ -105,8 +114,12 @@ async def chat(request: ChatRequest) -> ChatResponse:
             )
             tool_calls = []
     except Exception as e:
-        # e.g. missing/invalid GOOGLE_API_KEY, Gemini quota exceeded
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        print("=" * 80)
+        print(type(e))
+        print(repr(e))
+        traceback.print_exc()
+        print("=" * 80)
+        raise
     return ChatResponse(answer=answer, sources=sources, tool_calls=tool_calls)
 
 
@@ -135,22 +148,31 @@ def _rag_event_stream(request: ChatRequest):
             yield _sse("delta", {"text": text})
         yield _sse("done", {})
     except Exception as e:  # e.g. missing/invalid GOOGLE_API_KEY, Gemini quota
+        logger.exception("rag chat stream failed")
         yield _sse("error", {"detail": str(e)})
 
 
 async def _tools_event_stream(request: ChatRequest):
-    """Async generator (ENABLE_TOOLS path): the LangGraph agent isn't a token
-    stream, so run it to completion, then emit sources, tool_calls, and the
-    full answer as a single delta over the same SSE contract."""
+    """Async generator (ENABLE_TOOLS path): streams tool-execution `status`
+    events as the agent invokes tools, then the agent's final answer turn
+    token-by-token as Gemini generates it. tool_calls aren't known until the
+    graph finishes (they're the result of tool execution during the run), so
+    unlike the RAG path, that event necessarily arrives after the deltas."""
     try:
-        answer, sources, tool_calls = await graph_agent.answer_question_with_graph(
+        async for event, payload in graph_agent.answer_question_with_graph_stream(
             request.question, request.history, request.top_k
-        )
-        yield _sse("sources", [_dump(s) for s in sources])
-        yield _sse("tool_calls", [_dump(t) for t in tool_calls])
-        yield _sse("delta", {"text": answer})
+        ):
+            if event == "sources":
+                yield _sse("sources", [_dump(s) for s in payload])
+            elif event == "status":
+                yield _sse("status", payload)
+            elif event == "delta":
+                yield _sse("delta", {"text": payload})
+            elif event == "tool_calls":
+                yield _sse("tool_calls", [_dump(t) for t in payload])
         yield _sse("done", {})
     except Exception as e:
+        logger.exception("tools chat stream failed")
         yield _sse("error", {"detail": str(e)})
 
 
@@ -158,8 +180,9 @@ async def _tools_event_stream(request: ChatRequest):
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """Streaming variant of /chat over Server-Sent Events.
 
-    Events: `sources` (list), `tool_calls` (list, tools mode only), `delta`
-    ({"text": ...}) repeated, then `done` — or a single `error` ({"detail": ...}).
+    Events: `sources` (list), then `status` (dict, tools mode only, repeated
+    as tools run), `delta` ({"text": ...}) repeated, `tool_calls` (list,
+    tools mode only), then `done` — or a single `error` ({"detail": ...}).
     """
     generator = (
         _tools_event_stream(request)

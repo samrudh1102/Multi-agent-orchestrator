@@ -1,0 +1,438 @@
+{
+  "test_scenario": {
+    "milestone": [
+      {
+        "id": 5,
+        "name": "ZR5"
+      },
+      {
+        "id": 6,
+        "name": "ZR6"
+      },
+      {
+        "id": 7,
+        "name": "ZR7"
+      },
+      {
+        "id": 8,
+        "name": "ZR8"
+      },
+      {
+        "id": 9,
+        "name": "ZR9"
+      }
+    ]
+  },
+  "test_execution": {
+    "environment": [
+      {
+        "id": 1,
+        "name": "Dev"
+      },
+      {
+        "id": 2,
+        "name": "Staging"
+      },
+      {
+        "id": 3,
+        "name": "SDET"
+      },
+      {
+        "id": 4,
+        "name": "Prod 0"
+      },
+      {
+        "id": 5,
+        "name": "Prod 1"
+      }
+    ],
+    "ride_service": [
+      {
+        "id": 1,
+        "name": "Las Vegas",
+        "pudo_locations": [
+          {
+            "id": "LV-001",
+            "poi": "Mandalay Bay - Main Entrance",
+            "address": "",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 36.0906,
+            "longitude": -115.1745
+          },
+          {
+            "id": "LV-002",
+            "poi": "The Egg Shop",
+            "address": "3961 S Las Vegas Blvd, Las Vegas, NV 89119",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.092161,
+            "longitude": -115.173848
+          },
+          {
+            "id": "LV-003",
+            "poi": "Luxor Main",
+            "address": "",
+            "pickup_location": false,
+            "dropoff_location": true,
+            "latitude": 36.093722,
+            "longitude": -115.173196
+          },
+          {
+            "id": "LV-004",
+            "poi": "Luxor Hotel & Casino",
+            "address": "3900 S Las Vegas Blvd, Las Vegas, NV 89119",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.095283,
+            "longitude": -115.172543
+          },
+          {
+            "id": "LV-005",
+            "poi": "1923 Prohibition Bar",
+            "address": "3930 S Las Vegas Blvd #101, Las Vegas, NV 89119",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.096843,
+            "longitude": -115.171891
+          },
+          {
+            "id": "LV-006",
+            "poi": "Luxor North Entrance",
+            "address": "",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 36.098404,
+            "longitude": -115.171239
+          },
+          {
+            "id": "LV-007",
+            "poi": "Starbucks",
+            "address": "3850 Las Vegas Blvd S, Las Vegas, NV 89109",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.099965,
+            "longitude": -115.170587
+          },
+          {
+            "id": "LV-008",
+            "poi": "Excalibur - Rideshare",
+            "address": "",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 36.101526,
+            "longitude": -115.169935
+          },
+          {
+            "id": "LV-009",
+            "poi": "Starbucks",
+            "address": "3850 Las Vegas Blvd S, Las Vegas, NV 89109",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.103087,
+            "longitude": -115.169283
+          },
+          {
+            "id": "LV-010",
+            "poi": "Excalibur - Main Entrance",
+            "address": "",
+            "pickup_location": false,
+            "dropoff_location": true,
+            "latitude": 36.104648,
+            "longitude": -115.16863
+          },
+          {
+            "id": "LV-011",
+            "poi": "Excalibur Hotel & Casino",
+            "address": "3850 S Las Vegas Blvd, Las Vegas, NV 89109",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.106209,
+            "longitude": -115.167978
+          },
+          {
+            "id": "LV-012",
+            "poi": "New York - New York - Main Entrance",
+            "address": "",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 36.10777,
+            "longitude": -115.167326
+          },
+          {
+            "id": "LV-013",
+            "poi": "New York - New York Hotel & Casino",
+            "address": "3790 S Las Vegas Blvd, Las Vegas, NV 89109",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.10933,
+            "longitude": -115.166674
+          },
+          {
+            "id": "LV-014",
+            "poi": "M&M'S Las Vegas",
+            "address": "3785 S Las Vegas Blvd, Las Vegas, NV 89109",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.110891,
+            "longitude": -115.166022
+          },
+          {
+            "id": "LV-015",
+            "poi": "Park MGM",
+            "address": "",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 36.112452,
+            "longitude": -115.16537
+          },
+          {
+            "id": "LV-016",
+            "poi": "Park MGM Las Vegas",
+            "address": "",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.114013,
+            "longitude": -115.164717
+          },
+          {
+            "id": "LV-017",
+            "poi": "Paradox Museum Las Vegas",
+            "address": "",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.115574,
+            "longitude": -115.164065
+          },
+          {
+            "id": "LV-018",
+            "poi": "Bellagio - North Entrance",
+            "address": "",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 36.117135,
+            "longitude": -115.163413
+          },
+          {
+            "id": "LV-019",
+            "poi": "Starbucks",
+            "address": "3850 Las Vegas Blvd S, Las Vegas, NV 89109",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.118696,
+            "longitude": -115.162761
+          },
+          {
+            "id": "LV-020",
+            "poi": "Resorts World - Hilton Entrance",
+            "address": "",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 36.120257,
+            "longitude": -115.162109
+          },
+          {
+            "id": "LV-021",
+            "poi": "McDonalds",
+            "address": "",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.121817,
+            "longitude": -115.161457
+          },
+          {
+            "id": "LV-022",
+            "poi": "Clark County Fire Station",
+            "address": "",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.123378,
+            "longitude": -115.160804
+          },
+          {
+            "id": "LV-023",
+            "poi": "Palms Place - West",
+            "address": "",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 36.124939,
+            "longitude": -115.160152
+          },
+          {
+            "id": "LV-024",
+            "poi": "Chick-fil-A",
+            "address": "",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 36.1265,
+            "longitude": -115.1595
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "name": "San Francisco",
+        "pudo_locations": [
+          {
+            "id": "SF-001",
+            "poi": "Ferry Building - Embarcadero Entrance",
+            "address": "1 Sausalito Ferry Plaza, San Francisco, CA 94111",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 37.7955,
+            "longitude": -122.3937
+          },
+          {
+            "id": "SF-002",
+            "poi": "Blue Bottle Coffee",
+            "address": "66 Mint St, San Francisco, CA 94103",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 37.7825,
+            "longitude": -122.4076
+          },
+          {
+            "id": "SF-003",
+            "poi": "Salesforce Tower - Main Lobby",
+            "address": "415 Mission St, San Francisco, CA 94105",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 37.7897,
+            "longitude": -122.3972
+          },
+          {
+            "id": "SF-004",
+            "poi": "Salesforce Park",
+            "address": "425 Mission St, San Francisco, CA 94105",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 37.79,
+            "longitude": -122.3969
+          },
+          {
+            "id": "SF-005",
+            "poi": "Union Square - Powell St Entrance",
+            "address": "333 Post St, San Francisco, CA 94108",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 37.788,
+            "longitude": -122.4075
+          },
+          {
+            "id": "SF-006",
+            "poi": "Macy's Union Square",
+            "address": "170 O'Farrell St, San Francisco, CA 94102",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 37.787,
+            "longitude": -122.4079
+          },
+          {
+            "id": "SF-007",
+            "poi": "Moscone Center - North Entrance",
+            "address": "747 Howard St, San Francisco, CA 94103",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 37.7841,
+            "longitude": -122.4013
+          },
+          {
+            "id": "SF-008",
+            "poi": "SFMOMA",
+            "address": "151 3rd St, San Francisco, CA 94103",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 37.7857,
+            "longitude": -122.4011
+          },
+          {
+            "id": "SF-009",
+            "poi": "Chase Center - Thrive City",
+            "address": "1 Warriors Way, San Francisco, CA 94158",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 37.768,
+            "longitude": -122.3877
+          },
+          {
+            "id": "SF-010",
+            "poi": "Mission Bay Blue Bottle",
+            "address": "1200 3rd St, San Francisco, CA 94158",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 37.7706,
+            "longitude": -122.3906
+          },
+          {
+            "id": "SF-011",
+            "poi": "Fisherman's Wharf - Pier 39 Entrance",
+            "address": "Beach St & The Embarcadero, San Francisco, CA 94133",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 37.8087,
+            "longitude": -122.4098
+          },
+          {
+            "id": "SF-012",
+            "poi": "In-N-Out Burger - Fisherman's Wharf",
+            "address": "333 Jefferson St, San Francisco, CA 94133",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 37.8078,
+            "longitude": -122.4177
+          },
+          {
+            "id": "SF-013",
+            "poi": "Mission Dolores Park - 18th St Entrance",
+            "address": "Dolores St & 18th St, San Francisco, CA 94114",
+            "pickup_location": true,
+            "dropoff_location": true,
+            "latitude": 37.7596,
+            "longitude": -122.4269
+          },
+          {
+            "id": "SF-014",
+            "poi": "Tartine Bakery",
+            "address": "600 Guerrero St, San Francisco, CA 94110",
+            "pickup_location": false,
+            "dropoff_location": false,
+            "latitude": 37.7614,
+            "longitude": -122.4241
+          }
+        ]
+      }
+    ],
+    "device": [
+      {
+        "id": 1,
+        "name": "D-1001",
+        "host_machine": "Android-Host-01"
+      },
+      {
+        "id": 2,
+        "name": "D-1002",
+        "host_machine": "Android-Host-02"
+      },
+      {
+        "id": 3,
+        "name": "D-2001",
+        "host_machine": "runner-01"
+      },
+      {
+        "id": 4,
+        "name": "D-2002",
+        "host_machine": "runner-02"
+      }
+    ],
+    "host_machine": [
+      {
+        "id": 1,
+        "name": "runner-01"
+      },
+      {
+        "id": 2,
+        "name": "runner-02"
+      }
+    ]
+  }
+}
