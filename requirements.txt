@@ -1,0 +1,49 @@
+fastapi==0.115.0
+uvicorn[standard]>=0.35
+pydantic==2.11.7
+pydantic-settings==2.14.2
+python-multipart>=0.0.26
+
+# Injects the OS trust store into ssl (app/main.py) so this process, and
+# stdio MCP subprocesses given the same CA bundle, trust corporate proxy CAs.
+truststore==0.10.4
+
+# RAG framework
+langchain==1.3.11
+langchain-community==0.4.2
+langchain-google-genai==4.2.7
+langchain-text-splitters==1.1.2
+
+# Embeddings + vector search
+faiss-cpu==1.8.0.post1
+numpy==1.26.4
+
+# Document parsing (used via langchain-community document loaders)
+pypdf==5.0.1
+docx2txt==0.9
+
+# MCP: mcp (OAuth types for Jira/ClickHouse login, used by scripts/setup_jira_auth.py
+# and scripts/setup_clickhouse_auth.py; also used directly by those scripts for the
+# OAuth callback HTTP server), FastMCP client + LangGraph StateGraph agent
+# (ENABLE_TOOLS=true; see app/langgraph_agent/).
+mcp==1.28.1
+langgraph>=1.2
+fastmcp>=3.4
+langchain-mcp-adapters==0.3.1
+httpx>=0.27
+# langgraph-sdk (pulled in by langgraph) caps websockets<16; mcp/fastmcp pull
+# in a newer one otherwise. Pinned explicitly to avoid the conflict recurring.
+websockets==15.0.1
+
+# AWS S3 (mcp-proxy-for-aws bridge, see app/langgraph_agent/fastmcp_client.py) and
+# Redshift (app/redshift/mcp_server.py) both authenticate with AWS credentials;
+# boto3/botocore are used directly by the Redshift MCP server.
+boto3>=1.34
+
+# Postgres (app/postgres/mcp_server.py) -- async driver for the local Postgres MCP server.
+asyncpg>=0.29
+
+# Streamlit frontend (app/streamlit_app.py) + its HTTP client to the API
+# (requests floor set by langchain-community / google-api-core, which need >=2.33.0)
+streamlit==1.39.0
+requests>=2.33.0
