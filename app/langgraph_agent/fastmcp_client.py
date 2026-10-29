@@ -216,123 +216,123 @@ def _build_config() -> dict[str, Any]:
     Servers that are not configured/authenticated are simply omitted."""
     servers: dict[str, Any] = {}
 
-    jira_auth = _jira_auth()
-    if jira_auth:
-        servers["jira"] = {
-            "transport": "streamable_http",
-            "url": settings.jira_mcp_url,
-            "auth": jira_auth,
-        }
-    else:
-        logger.warning(
-            "No Jira access token found at %s; Jira tools will be unavailable. "
-            "Run scripts/setup_jira_auth.py to authenticate.",
-            settings.jira_token_file,
-        )
+    # jira_auth = _jira_auth()
+    # if jira_auth:
+    #     servers["jira"] = {
+    #         "transport": "streamable_http",
+    #         "url": settings.jira_mcp_url,
+    #         "auth": jira_auth,
+    #     }
+    # else:
+    #     logger.warning(
+    #         "No Jira access token found at %s; Jira tools will be unavailable. "
+    #         "Run scripts/setup_jira_auth.py to authenticate.",
+    #         settings.jira_token_file,
+    #     )
 
-    if settings.testrail_url and settings.testrail_username and settings.testrail_api_key:
-        servers["testrail"] = {
-            "transport": "stdio",
-            "command": settings.testrail_mcp_command,
-            "args": settings.testrail_mcp_args,
-            "env": _stdio_env({
-                "TESTRAIL_URL": settings.testrail_url,
-                "TESTRAIL_USERNAME": settings.testrail_username,
-                "TESTRAIL_API_KEY": settings.testrail_api_key,
-            }),
-        }
-    else:
-        logger.warning(
-            "TestRail is not fully configured (TESTRAIL_URL/USERNAME/API_KEY); "
-            "TestRail tools will be unavailable."
-        )
-    if settings.aws_access_key_id and settings.aws_secret_access_key:
-        # AWS's official remote MCP Server only speaks OAuth+SigV4, which no
-        # generic MCP client (including MultiServerMCPClient) can do natively.
-        # AWS's own fix is mcp-proxy-for-aws: a local stdio bridge that signs
-        # requests with our existing AWS creds and forwards them to the real
-        # remote server (aws_mcp_endpoint). No S3 logic runs locally anymore;
-        # this replaces app/s3/mcp_server.py entirely.
-        proxy_args = [settings.aws_mcp_proxy_package, settings.aws_mcp_endpoint]
-        region = settings.aws_mcp_region or settings.aws_default_region or "us-east-1"
-        proxy_args += ["--region", region]
-        if settings.aws_mcp_read_only:
-            proxy_args.append("--read-only")
-        servers["s3"] = {
-            "transport": "stdio",
-            "command": settings.aws_mcp_proxy_command,
-            "args": proxy_args,
-            "env": {
-                "AWS_ACCESS_KEY_ID": settings.aws_access_key_id,
-                "AWS_SECRET_ACCESS_KEY": settings.aws_secret_access_key,
-                "AWS_DEFAULT_REGION": region,
-            },
-        }
-    else:
-        logger.warning(
-            "AWS is not fully configured (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY); "
-            "S3 tools will be unavailable."
-        )
+    # if settings.testrail_url and settings.testrail_username and settings.testrail_api_key:
+    #     servers["testrail"] = {
+    #         "transport": "stdio",
+    #         "command": settings.testrail_mcp_command,
+    #         "args": settings.testrail_mcp_args,
+    #         "env": _stdio_env({
+    #             "TESTRAIL_URL": settings.testrail_url,
+    #             "TESTRAIL_USERNAME": settings.testrail_username,
+    #             "TESTRAIL_API_KEY": settings.testrail_api_key,
+    #         }),
+    #     }
+    # else:
+    #     logger.warning(
+    #         "TestRail is not fully configured (TESTRAIL_URL/USERNAME/API_KEY); "
+    #         "TestRail tools will be unavailable."
+    #     )
+    # if settings.aws_access_key_id and settings.aws_secret_access_key:
+    #     # AWS's official remote MCP Server only speaks OAuth+SigV4, which no
+    #     # generic MCP client (including MultiServerMCPClient) can do natively.
+    #     # AWS's own fix is mcp-proxy-for-aws: a local stdio bridge that signs
+    #     # requests with our existing AWS creds and forwards them to the real
+    #     # remote server (aws_mcp_endpoint). No S3 logic runs locally anymore;
+    #     # this replaces app/s3/mcp_server.py entirely.
+    #     proxy_args = [settings.aws_mcp_proxy_package, settings.aws_mcp_endpoint]
+    #     region = settings.aws_mcp_region or settings.aws_default_region or "us-east-1"
+    #     proxy_args += ["--region", region]
+    #     if settings.aws_mcp_read_only:
+    #         proxy_args.append("--read-only")
+    #     servers["s3"] = {
+    #         "transport": "stdio",
+    #         "command": settings.aws_mcp_proxy_command,
+    #         "args": proxy_args,
+    #         "env": {
+    #             "AWS_ACCESS_KEY_ID": settings.aws_access_key_id,
+    #             "AWS_SECRET_ACCESS_KEY": settings.aws_secret_access_key,
+    #             "AWS_DEFAULT_REGION": region,
+    #         },
+    #     }
+    # else:
+    #     logger.warning(
+    #         "AWS is not fully configured (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY); "
+    #         "S3 tools will be unavailable."
+    #     )
 
-    if settings.aws_access_key_id and settings.aws_secret_access_key and settings.redshift_database:
-        servers["redshift"] = {
-            "transport": "stdio",
-            "command": settings.redshift_mcp_command,
-            "args": settings.redshift_mcp_args,
-            "env": {
-                "AWS_ACCESS_KEY_ID": settings.aws_access_key_id,
-                "AWS_SECRET_ACCESS_KEY": settings.aws_secret_access_key,
-                "AWS_DEFAULT_REGION": settings.aws_default_region or "us-east-1",
-                "REDSHIFT_DATABASE": settings.redshift_database,
-                "REDSHIFT_WORKGROUP_NAME": settings.redshift_workgroup_name or "",
-                "REDSHIFT_CLUSTER_IDENTIFIER": settings.redshift_cluster_identifier or "",
-                "REDSHIFT_DB_USER": settings.redshift_db_user or "",
-                "REDSHIFT_SECRET_ARN": settings.redshift_secret_arn or "",
-            },
-        }
+    # if settings.aws_access_key_id and settings.aws_secret_access_key and settings.redshift_database:
+    #     servers["redshift"] = {
+    #         "transport": "stdio",
+    #         "command": settings.redshift_mcp_command,
+    #         "args": settings.redshift_mcp_args,
+    #         "env": {
+    #             "AWS_ACCESS_KEY_ID": settings.aws_access_key_id,
+    #             "AWS_SECRET_ACCESS_KEY": settings.aws_secret_access_key,
+    #             "AWS_DEFAULT_REGION": settings.aws_default_region or "us-east-1",
+    #             "REDSHIFT_DATABASE": settings.redshift_database,
+    #             "REDSHIFT_WORKGROUP_NAME": settings.redshift_workgroup_name or "",
+    #             "REDSHIFT_CLUSTER_IDENTIFIER": settings.redshift_cluster_identifier or "",
+    #             "REDSHIFT_DB_USER": settings.redshift_db_user or "",
+    #             "REDSHIFT_SECRET_ARN": settings.redshift_secret_arn or "",
+    #         },
+    #     }
 
-    postgres_uri = settings.postgres_mcp_uri
-    if postgres_uri:
-        # Our own local FastMCP server (app/postgres/mcp_server.py), run as a
-        # stdio subprocess with the same interpreter as the app -- same
-        # pattern as TestRail/Airflow above. postgres_mcp_uri builds a DSN
-        # from PGHOST/PGUSER/PGPASSWORD/PGDATABASE if postgres_database_uri
-        # isn't set directly.
-        servers["postgres"] = {
-            "transport": "stdio",
-            "command": settings.postgres_mcp_command,
-            "args": settings.postgres_mcp_args,
-            "env": _stdio_env(
-                {
-                    "DATABASE_URI": postgres_uri,
-                    "POSTGRES_MCP_ACCESS_MODE": settings.postgres_mcp_access_mode,
-                }
-            ),
-        }
-    else:
-        logger.warning(
-            "Postgres is not fully configured (PGHOST/PGUSER/PGPASSWORD/PGDATABASE "
-            "or POSTGRES_DATABASE_URI); Postgres tools will be unavailable."
-        )
+    # postgres_uri = settings.postgres_mcp_uri
+    # if postgres_uri:
+    #     # Our own local FastMCP server (app/postgres/mcp_server.py), run as a
+    #     # stdio subprocess with the same interpreter as the app -- same
+    #     # pattern as TestRail/Airflow above. postgres_mcp_uri builds a DSN
+    #     # from PGHOST/PGUSER/PGPASSWORD/PGDATABASE if postgres_database_uri
+    #     # isn't set directly.
+    #     servers["postgres"] = {
+    #         "transport": "stdio",
+    #         "command": settings.postgres_mcp_command,
+    #         "args": settings.postgres_mcp_args,
+    #         "env": _stdio_env(
+    #             {
+    #                 "DATABASE_URI": postgres_uri,
+    #                 "POSTGRES_MCP_ACCESS_MODE": settings.postgres_mcp_access_mode,
+    #             }
+    #         ),
+    #     }
+    # else:
+    #     logger.warning(
+    #         "Postgres is not fully configured (PGHOST/PGUSER/PGPASSWORD/PGDATABASE "
+    #         "or POSTGRES_DATABASE_URI); Postgres tools will be unavailable."
+    #     )
 
     # ClickHouse Cloud's own remote MCP server (single global endpoint,
     # OAuth 2.0 only — no API key/password auth). This replaces
     # app/clickhouse/mcp_server.py, which used clickhouse_url/user/password
     # directly; those REST creds are unused for MCP now but still power
     # scripts/seed_jira_mock.py.
-    clickhouse_auth = _clickhouse_auth()
-    if clickhouse_auth:
-        servers["clickhouse"] = {
-            "transport": "streamable_http",
-            "url": settings.clickhouse_mcp_url,
-            "auth": clickhouse_auth,
-        }
-    else:
-        logger.warning(
-            "No ClickHouse Cloud access token found at %s; ClickHouse tools will be unavailable. "
-            "Run scripts/setup_clickhouse_auth.py to authenticate.",
-            settings.clickhouse_token_file,
-        )
+    # clickhouse_auth = _clickhouse_auth()
+    # if clickhouse_auth:
+    #     servers["clickhouse"] = {
+    #         "transport": "streamable_http",
+    #         "url": settings.clickhouse_mcp_url,
+    #         "auth": clickhouse_auth,
+    #     }
+    # else:
+    #     logger.warning(
+    #         "No ClickHouse Cloud access token found at %s; ClickHouse tools will be unavailable. "
+    #         "Run scripts/setup_clickhouse_auth.py to authenticate.",
+    #         settings.clickhouse_token_file,
+    #     )
 
     grafana_token = settings.grafana_mcp_token
     if settings.grafana_url and grafana_token:
@@ -356,37 +356,37 @@ def _build_config() -> dict[str, Any]:
             "Grafana tools will be unavailable."
         )
 
-    if settings.airflow_url:
-        servers["airflow"] = {
-            "transport": "stdio",
-            "command": settings.airflow_mcp_command,
-            "args": settings.airflow_mcp_args,
-            "env": {
-                "AIRFLOW_URL": settings.airflow_url,
-                "AIRFLOW_USERNAME": settings.airflow_username or "",
-                "AIRFLOW_PASSWORD": settings.airflow_password or "",
-                "AIRFLOW_TOKEN": settings.airflow_token or "",
-            },
-        }
+    # if settings.airflow_url:
+    #     servers["airflow"] = {
+    #         "transport": "stdio",
+    #         "command": settings.airflow_mcp_command,
+    #         "args": settings.airflow_mcp_args,
+    #         "env": {
+    #             "AIRFLOW_URL": settings.airflow_url,
+    #             "AIRFLOW_USERNAME": settings.airflow_username or "",
+    #             "AIRFLOW_PASSWORD": settings.airflow_password or "",
+    #             "AIRFLOW_TOKEN": settings.airflow_token or "",
+    #         },
+    #     }
 
-    if settings.databricks_host and settings.databricks_token:
-        # Databricks' own managed remote MCP server for SQL Warehouses
-        # (https://<workspace>/api/2.0/mcp/sql), reached directly over
-        # streamable_http with the same PAT used before, sent as a bearer
-        # header. This replaces app/databricks/mcp_server.py; note the
-        # managed endpoint only exposes SQL query tools (execute_sql/
-        # poll_response) — there is no remote equivalent for the Jobs API,
-        # so list_jobs/trigger_job are no longer available.
-        servers["databricks"] = {
-            "transport": "streamable_http",
-            "url": settings.databricks_mcp_url,
-            "headers": {"Authorization": f"Bearer {settings.databricks_token}"},
-        }
-    else:
-        logger.warning(
-            "Databricks is not fully configured (DATABRICKS_HOST/DATABRICKS_TOKEN); "
-            "Databricks tools will be unavailable."
-        )
+    # if settings.databricks_host and settings.databricks_token:
+    #     # Databricks' own managed remote MCP server for SQL Warehouses
+    #     # (https://<workspace>/api/2.0/mcp/sql), reached directly over
+    #     # streamable_http with the same PAT used before, sent as a bearer
+    #     # header. This replaces app/databricks/mcp_server.py; note the
+    #     # managed endpoint only exposes SQL query tools (execute_sql/
+    #     # poll_response) — there is no remote equivalent for the Jobs API,
+    #     # so list_jobs/trigger_job are no longer available.
+    #     servers["databricks"] = {
+    #         "transport": "streamable_http",
+    #         "url": settings.databricks_mcp_url,
+    #         "headers": {"Authorization": f"Bearer {settings.databricks_token}"},
+    #     }
+    # else:
+    #     logger.warning(
+    #         "Databricks is not fully configured (DATABRICKS_HOST/DATABRICKS_TOKEN); "
+    #         "Databricks tools will be unavailable."
+    #     )
 
 
     return servers
@@ -430,19 +430,19 @@ STRICT_TOOL_ALLOWLIST: set[str] = {
     "testrail_get_results",
     "testrail_get_cases",
 
-    # S3 (2 tools)
-    "s3_list_objects",
-    "s3_get_object",
-
-    # Grafana (3 tools)
-    "grafana_get_dashboard_by_uid",
-    "grafana_search_dashboards",
-    "grafana_get_panel_data",
-
-    # Redshift (2 tools)
-    "redshift_query",
-    "redshift_describe_table",
 }
+   # # S3 (2 tools)
+    # "s3_list_objects",
+    # "s3_get_object",
+
+    # # Grafana (3 tools)
+    # "grafana_get_dashboard_by_uid",
+    # "grafana_search_dashboards",
+    # "grafana_get_panel_data",
+
+    # # Redshift (2 tools)
+    # "redshift_query",
+    # "redshift_describe_table",
 
 
 class FastMCPToolProvider:
