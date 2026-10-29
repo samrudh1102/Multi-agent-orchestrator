@@ -247,78 +247,58 @@ def warm_up() -> None:
     _get_graph()
 
 
-async def answer_question_with_graph(
-    question: str, history: list[dict[str, str]] | None = None, top_k: int | None = None
-) -> tuple[str, list[SourceChunk], list[ToolCallInfo]]:
-    print(f"[FLOW] answer_question_with_graph: called with question={question!r}, "
-          f"history has {len(history or [])} turn(s)")
-    _debug(f"\n{'='*80}\n[START] question -> {question!r}")
-    t0 = time.monotonic()
-    # retrieve_sources is a blocking call (embedding + FAISS); offload it so
-    # it doesn't stall the event loop, mirroring the non-tools path in main.py.
-    sources = await asyncio.to_thread(retrieve_sources, question, top_k)
-    retrieve_elapsed = time.monotonic() - t0
-    logger.info("answer_question_with_graph: retrieve_sources took %.2fs", retrieve_elapsed)
-    _debug(f"[START] retrieved {len(sources)} source chunk(s) in {retrieve_elapsed:.2f}s")
 
-    user_prompt = build_user_prompt(question, sources, allow_tools=True)
+# async def answer_question_with_graph_stream(
+#     question: str, history: list[dict[str, str]] | None = None, top_k: int | None = None
+# ):
+#     # Only retrieve from FAISS if explicitly needed; avoid 2-second embedding penalty on live SQL queries
+#     sources = []
+#     # If question mentions policy/handbook/docs, you can optionally run retrieve_sources
+#     yield ("sources", sources)
 
-    messages: list = [SystemMessage(content=SYSTEM_PROMPT)]
-    for turn in history or []:
-        role = turn.get("role")
-        content = turn.get("content", "")
-        if role == "user":
-            messages.append(HumanMessage(content=content))
-        elif role == "assistant":
-            messages.append(AIMessage(content=content))
-    messages.append(HumanMessage(content=user_prompt))
+#     messages: list = [SystemMessage(content=SYSTEM_PROMPT)]
+#     for turn in history or []:
+#         role = turn.get("role")
+#         content = turn.get("content", "")
+#         if role == "user":
+#             messages.append(HumanMessage(content=content))
+#         elif role == "assistant":
+#             messages.append(AIMessage(content=content))
+#     messages.append(HumanMessage(content=question))
 
-    graph = _get_graph()
-    print(f"[FLOW] answer_question_with_graph: invoking graph with {len(messages)} message(s)")
-    # recursion_limit bounds the agent<->tools loop; each tool round trip is two
-    # steps, so mirror the manual path's max_tool_iterations budget.
-    t1 = time.monotonic()
-    result = await graph.ainvoke(
-        {"messages": messages},
-        config={"recursion_limit": settings.max_tool_iterations * 2 + 1},
-    )
-    graph_elapsed = time.monotonic() - t1
-    print(f"[FLOW] answer_question_with_graph: graph.ainvoke returned {len(result['messages'])} "
-          f"message(s) in {graph_elapsed:.2f}s")
+#     graph = _get_graph()
+#     queue: asyncio.Queue = asyncio.Queue()
 
-    out_messages = result["messages"]
-    tool_waves = [len(m.tool_calls) for m in out_messages if isinstance(m, AIMessage) and m.tool_calls]
-    num_tool_calls = sum(tool_waves)
-    parallel_waves = sum(1 for n in tool_waves if n > 1)
-    serial_waves = sum(1 for n in tool_waves if n == 1)
-    logger.info(
-        "answer_question_with_graph: graph.ainvoke took %.2fs total across %d message(s), "
-        "%d tool call(s) in %d wave(s) (agent<->tools round trips) — %d parallel wave(s) "
-        "(batched %d call(s)), %d serial wave(s) (1 call each)",
-        graph_elapsed, len(out_messages), num_tool_calls, len(tool_waves),
-        parallel_waves, sum(n for n in tool_waves if n > 1), serial_waves,
-    )
-    tool_call_records = _collect_tool_calls(out_messages)
+#     async def on_delta(text: str) -> None:
+#         await queue.put(("delta", text))
 
-    answer = ""
-    for m in reversed(out_messages):
-        if isinstance(m, AIMessage) and not m.tool_calls:
-            answer = _extract_text(m.content)
-            break
+#     async def on_status(status: dict) -> None:
+#         await queue.put(("status", status))
 
-    total_elapsed = time.monotonic() - t0
-    logger.info(
-        "answer_question_with_graph: TOTAL %.2fs (retrieve_sources %.2fs + graph.ainvoke %.2fs)",
-        total_elapsed, retrieve_elapsed, graph_elapsed,
-    )
-    _debug(f"[END] {len(tool_call_records)} tool call(s) total, final answer -> {answer!r:.300}")
-    _debug(f"[END] TOTAL {total_elapsed:.2f}s (retrieve {retrieve_elapsed:.2f}s + graph {graph_elapsed:.2f}s)")
-    _debug(f"{'='*80}\n")
-    print(f"[FLOW] answer_question_with_graph: returning answer ({len(answer)} char(s)), "
-          f"{len(sources)} source(s), {len(tool_call_records)} tool call record(s)")
-    return answer, sources, tool_call_records
+#     async def run_graph():
+#         try:
+#             return await graph.ainvoke(
+#                 {"messages": messages},
+#                 config={
+#                     "configurable": {"on_delta": on_delta, "on_status": on_status},
+#                     "recursion_limit": settings.max_tool_iterations * 2 + 1,
+#                 },
+#             )
+#         finally:
+#             await queue.put(None)
 
+#     task = asyncio.create_task(run_graph())
 
+#     while True:
+#         item = await queue.get()
+#         if item is None:
+#             break
+#         kind, payload = item
+#         yield (kind, payload)
+
+#     result = await task
+#     tool_call_records = _collect_tool_calls(result["messages"])
+#     yield ("tool_calls", tool_call_records)
 async def answer_question_with_graph_stream(
     question: str, history: list[dict[str, str]] | None = None, top_k: int | None = None
 ):

@@ -40,12 +40,12 @@ class Settings(BaseSettings):
     chunk_size: int = 800
     chunk_overlap: int = 120
 
-    top_k: int = 4
+    top_k: int = 3
 
     upload_dir: str = "data/uploads"
     index_dir: str = "data/index"
 
-    max_new_tokens: int = 10000
+    max_new_tokens: int = 1500
     temperature: float = 0.3
 
     # -------------------------------------------------------------------------

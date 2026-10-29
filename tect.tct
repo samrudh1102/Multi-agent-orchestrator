@@ -1,0 +1,85 @@
+026-08-12 16:05:15,837 app.langgraph_agent.fastmcp_client INFO MultiServerMCPClient connecting to servers: ['airflow', 'clickhouse', 'databricks', 'grafana', 'jira', 'postgres', 'redshift', 's3', 'testrail']
+⠙ mcp-proxy-for-aws==1.6.4                                                                                                                                                                     2026-08-12 16:05:16,701 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:05:16,701 mcp.client.streamable_http INFO Received session ID: r4-e7fca001-598d-487e-a2cf-f70e82c12d7c
+2026-08-12 16:05:16,704 mcp.client.streamable_http INFO Negotiated protocol version: 2025-11-25
+time=2026-08-12T16:05:16.710+05:30 level=INFO msg="Using Grafana configuration" url=https://honestimpatiens205.grafana.net api_key_set=true basic_auth_set=false org_id=0 extra_headers_count=0
+⠹ mcp-proxy-for-aws==1.6.4       
+
+2026-08-12 16:05:17,669 httpx INFO HTTP Request: POST https://mcp.clickhouse.cloud/mcp "HTTP/1.1 200 OK"
+2026-08-12 16:05:17,670 mcp.client.streamable_http INFO Negotiated protocol version: 2025-11-25
+2026-08-12 16:05:17,846 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:05:18,219 httpx INFO HTTP Request: POST https://dbc-f4beb337-0080.cloud.databricks.com/api/2.0/mcp/sql "HTTP/1.1 200 OK"
+2026-08-12 16:05:18,220 mcp.client.streamable_http INFO Negotiated protocol version: 2025-11-25
+2026-08-12 16:05:18,527 httpx INFO HTTP Request: POST https://mcp.clickhouse.cloud/mcp "HTTP/1.1 202 Accepted"
+2026-08-12 16:05:18,554 httpx INFO HTTP Request: DELETE https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:05:18,561 httpx INFO HTTP Request: POST https://dbc-f4beb337-0080.cloud.databricks.com/api/2.0/mcp/sql "HTTP/1.1 202 Accepted"
+time=2026-08-12T16:05:18.814+05:30 level=INFO msg="Fetched public URL from Grafana frontend settings" public_url=https://honestimpatiens205.grafana.net
+2026-08-12 16:05:19,337 httpx INFO HTTP Request: POST https://dbc-f4beb337-0080.cloud.databricks.com/api/2.0/mcp/sql "HTTP/1.1 200 OK"
+time=2026-08-12T16:05:19.547+05:30 level=INFO msg="connected to proxied MCP servers" datasources=1
+time=2026-08-12T16:05:19.547+05:30 level=INFO msg="registered proxied tools on server" tools=8
+time=2026-08-12T16:05:19.547+05:30 level=INFO msg="Starting Grafana MCP server using stdio transport" version=v1.1.0
+time=2026-08-12T16:05:19.547+05:30 level=INFO msg="Using Grafana configuration" url=https://honestimpatiens205.grafana.net api_key_set=true basic_auth_set=false org_id=0 extra_headers_count=0
+2026-08-12 16:05:19,759 httpx INFO HTTP Request: POST https://mcp.clickhouse.cloud/mcp "HTTP/1.1 200 OK"
+2026-08-12 16:05:23,083 app.langgraph_agent.fastmcp_client INFO MultiServerMCPClient connected in 7.25s: 174 tool(s) available, per server: {'jira': 40, 'testrail': 24, 's3': 6, 'redshift': 4, 'postgres': 4, 'clickhouse': 16, 'grafana': 73, 'airflow': 4, 'databricks': 3}
+
+2026-08-12 16:06:23,735 httpx INFO HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:batchEmbedContents "HTTP/1.1 200 OK"
+2026-08-12 16:06:23,739 app.langgraph_agent.graph_agent INFO answer_question_with_graph: retrieve_sources took 0.81s
+2026-08-12 16:06:23,860 app.langgraph_agent.graph_agent INFO tool routing: matched servers ['clickhouse', 'grafana', 'jira', 'postgres', 's3', 'testrail'] -> 163/174 tools
+2026-08-12 16:06:29,984 app.langgraph_agent.graph_agent INFO tool_call: testrail_get_projects took 3.37s
+2026-08-12 16:06:29,986 app.langgraph_agent.graph_agent INFO tool routing: matched servers ['clickhouse', 'grafana', 'jira', 'postgres', 's3', 'testrail'] -> 163/174 tools
+2026-08-12 16:06:30,020 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:30,020 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:33,147 httpx INFO HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-08-12 16:06:33,151 app.langgraph_agent.graph_agent INFO agent_node: select+bind took 0.00s (cache hit), LLM call took 3.16s, 163 tool(s) bound
+2026-08-12 16:06:37,382 httpx INFO HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-08-12 16:06:37,385 app.langgraph_agent.graph_agent INFO agent_node: select+bind took 0.00s (cache hit), LLM call took 1.96s, 163 tool(s) bound
+2026-08-12 16:06:37,849 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:37,849 mcp.client.streamable_http INFO Received session ID: r4-78ccb8a4-b311-42be-9b67-a01ae52d82b1
+2026-08-12 16:06:37,850 mcp.client.streamable_http INFO Negotiated protocol version: 2025-11-25
+2026-08-12 16:06:38,306 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 202 Accepted"
+2026-08-12 16:06:38,706 httpx INFO HTTP Request: GET https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:39,426 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:39,933 httpx INFO HTTP Request: DELETE https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:39,935 app.langgraph_agent.graph_agent INFO tool_call: jira_searchJiraIssuesUsingJql took 2.55s
+2026-08-12 16:06:39,936 app.langgraph_agent.graph_agent INFO tool routing: matched servers ['clickhouse', 'grafana', 'jira', 'postgres', 's3', 'testrail'] -> 163/174 tools
+2026-08-12 16:06:39,991 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:42,009 httpx INFO HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-08-12 16:06:42,012 app.langgraph_agent.graph_agent INFO agent_node: select+bind took 0.00s (cache hit), LLM call took 2.08s, 163 tool(s) bound
+2026-08-12 16:06:42,400 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:42,400 mcp.client.streamable_http INFO Received session ID: r4-ad4a4a91-d0e2-4b32-a9f5-0b9a4a792687
+2026-08-12 16:06:42,403 mcp.client.streamable_http INFO Negotiated protocol version: 2025-11-25
+2026-08-12 16:06:42,749 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 202 Accepted"
+2026-08-12 16:06:43,256 httpx INFO HTTP Request: GET https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:43,568 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:44,552 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:45,054 httpx INFO HTTP Request: DELETE https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:45,055 app.langgraph_agent.graph_agent INFO tool_call: jira_getAccessibleAtlassianResources took 3.04s
+2026-08-12 16:06:45,056 app.langgraph_agent.graph_agent INFO tool routing: matched servers ['clickhouse', 'grafana', 'jira', 'postgres', 's3', 'testrail'] -> 163/174 tools
+2026-08-12 16:06:45,057 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:45,057 langchain_google_genai._function_utils WARNING Key '$schema' is not supported in schema, ignoring
+2026-08-12 16:06:47,309 httpx INFO HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-08-12 16:06:47,311 app.langgraph_agent.graph_agent INFO agent_node: select+bind took 0.00s (cache hit), LLM call took 2.26s, 163 tool(s) bound
+2026-08-12 16:06:47,680 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:47,680 mcp.client.streamable_http INFO Received session ID: r4-4507c50f-4648-4934-81de-7e0be8295c5b
+2026-08-12 16:06:47,683 mcp.client.streamable_http INFO Negotiated protocol version: 2025-11-25
+2026-08-12 16:06:48,042 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 202 Accepted"
+2026-08-12 16:06:48,538 httpx INFO HTTP Request: GET https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:48,897 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:51,823 httpx INFO HTTP Request: POST https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:52,330 httpx INFO HTTP Request: DELETE https://mcp.atlassian.com/v1/mcp/authv2 "HTTP/1.1 200 OK"
+2026-08-12 16:06:52,333 app.langgraph_agent.graph_agent INFO tool_call: jira_searchJiraIssuesUsingJql took 5.02s
+2026-08-12 16:06:52,335 app.langgraph_agent.graph_agent INFO tool routing: matched servers ['clickhouse', 'grafana', 'jira', 'postgres', 's3', 'testrail'] -> 163/174 tools
+2026-08-12 16:06:52,337 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:52,337 langchain_google_genai._function_utils WARNING Key '$schema' is not supported in schema, ignoring
+2026-08-12 16:06:52,337 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:52,337 langchain_google_genai._function_utils WARNING Key '$schema' is not supported in schema, ignoring
+2026-08-12 16:06:52,338 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:52,338 langchain_google_genai._function_utils WARNING Key '$schema' is not supported in schema, ignoring
+2026-08-12 16:06:52,340 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:52,340 langchain_google_genai._function_utils WARNING Key '$schema' is not supported in schema, ignoring
+2026-08-12 16:06:52,341 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:52,341 langchain_google_genai._function_utils WARNING Key '$schema' is not supported in schema, ignoring
+2026-08-12 16:06:52,386 langchain_google_genai._function_utils WARNING Key 'additionalProperties' is not supported in schema, ignoring
+2026-08-12 16:06:54,839 httpx INFO HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-08-12 16:06:54,842 app.langgraph_agent.graph_agent INFO agent_node: select+bind took 0.00s (cache hit), LLM call took 2.51s, 163 tool(s) bound
+2026-08-12 16:06:54,844 app.langgraph_agent.graph_agent INFO answer_question_with_graph: graph.ainvoke took 30.99s total across 13 message(s), 5 tool call(s)
