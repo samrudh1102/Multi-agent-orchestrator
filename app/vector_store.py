@@ -1,120 +1,160 @@
-"""A persistence layer around LangChain's FAISS vectorstore (inner-product
-metric, since embeddings are L2-normalized, so it behaves as cosine
-similarity), adding doc_id-scoped delete/list on top of it."""
-import threading
-import uuid
+"""Qdrant-backed vector storage for document chunks.
 
-import faiss
-from langchain_community.docstore.in_memory import InMemoryDocstore
-from langchain_community.vectorstores import FAISS
-from langchain_community.vectorstores.utils import DistanceStrategy
+Qdrant is an external service so multiple API workers share one index. Vectors
+and payloads are written in bounded batches; the API process never loads the
+whole corpus into memory.
+"""
+import uuid
+from collections import OrderedDict
+
 from langchain_core.documents import Document
+from qdrant_client import QdrantClient, models
 
 from app.config import settings
 from app.embeddings import get_embeddings
 
-_INDEX_NAME = "faiss"
-
 
 class VectorStore:
     def __init__(self) -> None:
-        self._lock = threading.Lock()
         self._embeddings = get_embeddings()
-        self._index_dir = settings.index_path
-        self._store = self._load_or_create()
-
-    # ---------- persistence ----------
-
-    def _load_or_create(self) -> FAISS:
-        index_file = self._index_dir / f"{_INDEX_NAME}.faiss"
+        self._client = QdrantClient(
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key,
+            timeout=settings.qdrant_timeout,
+        )
+        self._collection = settings.qdrant_collection
         dim = len(self._embeddings.embed_query("dimension probe"))
-
-        if index_file.exists():
-            # allow_dangerous_deserialization is safe here: the index/docstore
-            # pickle is written only by this app, to its own local index dir.
-            store = FAISS.load_local(
-                str(self._index_dir),
-                self._embeddings,
-                index_name=_INDEX_NAME,
-                allow_dangerous_deserialization=True,
+        if not self._client.collection_exists(self._collection):
+            self._client.create_collection(
+                collection_name=self._collection,
+                vectors_config=models.VectorParams(
+                    size=dim, distance=models.Distance.COSINE, on_disk=True
+                ),
+                hnsw_config=models.HnswConfigDiff(m=16, ef_construct=128, on_disk=True),
+                optimizers_config=models.OptimizersConfigDiff(indexing_threshold=20_000),
+                on_disk_payload=True,
             )
-          
-            return store
-
-        return FAISS(
-            embedding_function=self._embeddings,
-            index=faiss.IndexFlatIP(dim),
-            docstore=InMemoryDocstore(),
-            index_to_docstore_id={},
-            distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT,
+        self._client.create_payload_index(
+            self._collection, "doc_id", field_schema=models.PayloadSchemaType.KEYWORD
         )
 
-
-    def _save(self) -> None:
-        self._store.save_local(str(self._index_dir), index_name=_INDEX_NAME)
-
-    # ---------- mutation ----------
-
     def add_document(self, filename: str, chunks: list[Document]) -> str:
-        """Adds all chunks of one document to the index. Returns the new doc_id."""
+        """Embed and upsert chunks in batches, returning the source document ID."""
         doc_id = str(uuid.uuid4())
-        for i, chunk in enumerate(chunks):
-            chunk.metadata.update({"doc_id": doc_id, "filename": filename, "chunk_index": i})
-
-        with self._lock:
-            ids = [f"{doc_id}:{i}" for i in range(len(chunks))]
-            self._store.add_documents(chunks, ids=ids)
-            self._save()
+        batch_size = settings.embedding_batch_size
+        try:
+            for start in range(0, len(chunks), batch_size):
+                batch = chunks[start : start + batch_size]
+                vectors = self._embeddings.embed_documents([c.page_content for c in batch])
+                points = []
+                for offset, (chunk, vector) in enumerate(zip(batch, vectors)):
+                    chunk_index = start + offset
+                    points.append(
+                        models.PointStruct(
+                            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc_id}:{chunk_index}")),
+                            vector=vector,
+                            payload={
+                                "doc_id": doc_id,
+                                "filename": filename,
+                                "chunk_index": chunk_index,
+                                "num_chunks": len(chunks),
+                                "text": chunk.page_content,
+                            },
+                        )
+                    )
+                self._client.upsert(self._collection, points=points, wait=True)
+        except Exception:
+            self._client.delete(
+                self._collection,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))]
+                    )
+                ),
+                wait=True,
+            )
+            raise
         return doc_id
 
     def delete_document(self, doc_id: str) -> bool:
-        with self._lock:
-            ids = [
-                doc_id_key
-                for doc_id_key, doc in self._store.docstore._dict.items()
-                if doc.metadata.get("doc_id") == doc_id
-            ]
-            if not ids:
-                return False
-            self._store.delete(ids)
-            self._save()
+        found = self._client.count(
+            self._collection,
+            count_filter=models.Filter(must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))]),
+            exact=True,
+        ).count
+        if not found:
+            return False
+        self._client.delete(
+            self._collection,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))]
+                )
+            ),
+            wait=True,
+        )
         return True
 
-    # ---------- query ----------
-
     def search(self, query: str, top_k: int) -> list[dict]:
-        with self._lock:
-            results = self._store.similarity_search_with_score(query, k=top_k)
-
+        vector = self._embeddings.embed_query(query)
+        hits = self._client.query_points(
+            collection_name=self._collection,
+            query=vector,
+            limit=top_k,
+            with_payload=True,
+            search_params=models.SearchParams(hnsw_ef=settings.qdrant_hnsw_ef),
+        ).points
         return [
             {
-                "doc_id": doc.metadata["doc_id"],
-                "filename": doc.metadata["filename"],
-                "chunk_index": doc.metadata["chunk_index"],
-                "text": doc.page_content,
-                "score": float(score),
+                "doc_id": hit.payload["doc_id"],
+                "filename": hit.payload["filename"],
+                "chunk_index": hit.payload["chunk_index"],
+                "text": hit.payload["text"],
+                "score": float(hit.score),
             }
-            for doc, score in results
+            for hit in hits
         ]
 
     def list_documents(self) -> list[dict]:
-        docs: dict[str, dict] = {}
-        for doc in self._store.docstore._dict.values():
-            doc_id = doc.metadata["doc_id"]
-            if doc_id not in docs:
-                docs[doc_id] = {"doc_id": doc_id, "filename": doc.metadata["filename"], "num_chunks": 0}
-            docs[doc_id]["num_chunks"] += 1
+        """Return a bounded document listing; never scan an unbounded corpus."""
+        cap = settings.document_list_limit
+        docs: OrderedDict[str, dict] = OrderedDict()
+        offset = None
+        while len(docs) < cap:
+            points, offset = self._client.scroll(
+                self._collection,
+                limit=min(1000, cap * 4),
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not points:
+                break
+            for point in points:
+                payload = point.payload or {}
+                doc_id = payload.get("doc_id")
+                if not doc_id:
+                    continue
+                if doc_id not in docs:
+                    docs[doc_id] = {
+                        "doc_id": doc_id,
+                        "filename": payload.get("filename", ""),
+                        "num_chunks": int(payload.get("num_chunks", 0)),
+                    }
+                    if len(docs) >= cap:
+                        break
+                if len(docs) >= cap and offset is None:
+                    break
+            if offset is None:
+                break
         return list(docs.values())
 
 
 _store: VectorStore | None = None
-_store_lock = threading.Lock()
 
 
 def get_vector_store() -> VectorStore:
     global _store
     if _store is None:
-        with _store_lock:
-            if _store is None:
-                _store = VectorStore()
+        _store = VectorStore()
     return _store

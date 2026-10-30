@@ -251,7 +251,7 @@ def warm_up() -> None:
 # async def answer_question_with_graph_stream(
 #     question: str, history: list[dict[str, str]] | None = None, top_k: int | None = None
 # ):
-#     # Only retrieve from FAISS if explicitly needed; avoid 2-second embedding penalty on live SQL queries
+#     # Only retrieve from Qdrant if explicitly needed; avoid retrieval latency on live SQL queries
 #     sources = []
 #     # If question mentions policy/handbook/docs, you can optionally run retrieve_sources
 #     yield ("sources", sources)
@@ -315,9 +315,9 @@ async def answer_question_with_graph_stream(
     print(f"[FLOW] answer_question_with_graph_stream: called with question={question!r}, "
           f"history has {len(history or [])} turn(s)")
     t0 = time.monotonic()
-    # retrieve_sources is a blocking call (embedding + FAISS); offload it so
+    # retrieve_sources is a blocking call (embedding + Qdrant + reranking); offload it so
     # it doesn't stall the event loop, mirroring the non-tools path in main.py.
-    sources = await asyncio.to_thread(retrieve_sources, question, top_k)
+    sources = await asyncio.to_thread(retrieve_sources, question, top_k, history)
     retrieve_elapsed = time.monotonic() - t0
     logger.info("answer_question_with_graph_stream: retrieve_sources took %.2fs", retrieve_elapsed)
     print(f"[FLOW] answer_question_with_graph_stream: retrieved {len(sources)} source(s) in "
@@ -379,7 +379,6 @@ async def answer_question_with_graph_stream(
     print(f"[FLOW] answer_question_with_graph_stream: graph task finished, "
           f"{len(tool_call_records)} tool call record(s), yielding ('tool_calls', ...)")
     yield ("tool_calls", tool_call_records)
-
     total_elapsed = time.monotonic() - t0
     logger.info(
         "answer_question_with_graph_stream: TOTAL %.2fs (retrieve_sources %.2fs + graph %.2fs)",
@@ -388,6 +387,22 @@ async def answer_question_with_graph_stream(
     print(f"[FLOW] answer_question_with_graph_stream: TOTAL {total_elapsed:.2f}s "
           f"(retrieve {retrieve_elapsed:.2f}s + graph {graph_elapsed:.2f}s)")
 
+
+async def answer_question_with_graph(
+    question: str, history: list[dict[str, str]] | None = None, top_k: int | None = None
+):
+    """Non-streaming API wrapper over the same retrieval and agent flow."""
+    answer_parts: list[str] = []
+    sources: list[SourceChunk] = []
+    tool_calls: list[ToolCallInfo] = []
+    async for event, payload in answer_question_with_graph_stream(question, history, top_k):
+        if event == "sources":
+            sources = payload
+        elif event == "delta":
+            answer_parts.append(payload)
+        elif event == "tool_calls":
+            tool_calls = payload
+    return "".join(answer_parts), sources, tool_calls
 
 def _collect_tool_calls(messages: list) -> list[ToolCallInfo]:
     """Pair each AIMessage tool call with its ToolMessage result for the API

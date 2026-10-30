@@ -14,9 +14,10 @@ langchain-community==0.4.2
 langchain-google-genai==4.2.7
 langchain-text-splitters==1.1.2
 
-# Embeddings + vector search
-faiss-cpu==1.8.0.post1
-numpy==1.26.4
+# Embeddings + scalable external vector database + local cross-encoder reranker
+qdrant-client>=1.12,<2
+sentence-transformers>=3.3,<6
+tiktoken>=0.7
 
 # Document parsing (used via langchain-community document loaders)
 pypdf==5.0.1

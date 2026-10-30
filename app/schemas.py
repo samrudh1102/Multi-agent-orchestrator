@@ -15,7 +15,7 @@ class DocumentInfo(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1)
-    top_k: int | None = None
+    top_k: int | None = Field(default=None, ge=1, le=10)
     history: list[dict[str, str]] = Field(
         default_factory=list,
         description='Optional prior turns: [{"role": "user"|"assistant", "content": "..."}]',

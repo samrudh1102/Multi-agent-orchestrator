@@ -1,10 +1,10 @@
-# RAG Chatbot API (FastAPI + Google Gemini + FAISS)
+# RAG Chatbot API (FastAPI + Google Gemini + Qdrant)
 
 A retrieval-augmented generation (RAG) chatbot backend:
 
 - **FastAPI** for the HTTP API
 - **Google Gemini** for both embeddings (`text-embedding-004`) and text generation
-- **FAISS** (in-memory, file-persisted) for vector search
+- **Qdrant** for external, persistent approximate nearest-neighbor vector search
 - Ingests **PDF, DOCX, TXT, and Markdown** files
 
 ## Project layout
@@ -18,7 +18,8 @@ rag-chatbot/
 │   ├── document_loader.py # PDF/DOCX/TXT/MD -> plain text
 │   ├── text_splitter.py    # Chunking with overlap
 │   ├── embeddings.py       # Google Gemini embedding wrapper
-│   ├── vector_store.py     # FAISS index + metadata, with persistence
+│   ├── vector_store.py     # Qdrant point storage and vector search
+│   ├── retrieval.py        # query rewrite, reciprocal-rank fusion, reranking
 │   ├── llm.py              # Google Gemini chat model (plain + tool-calling)
 │   ├── rag_pipeline.py     # Ties ingestion + retrieval + generation together
 │   └── langgraph_agent/    # tool-calling path (ENABLE_TOOLS=true): FastMCP + LangGraph
@@ -29,7 +30,7 @@ rag-chatbot/
 │   └── setup_clickhouse_auth.py # One-time interactive OAuth login for ClickHouse Cloud's remote MCP server
 ├── data/
 │   ├── uploads/            # temp storage during ingestion
-│   ├── index/              # persisted FAISS index + metadata.json
+│   ├── index/              # legacy local FAISS data (not used by current backend)
 │   └── mcp_tokens/         # persisted Jira/ClickHouse OAuth tokens (created by the setup_*_auth.py scripts)
 └── requirements.txt
 ```
@@ -42,11 +43,11 @@ source venv/bin/activate        # on Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Then create a `.env` file in the project root (it's git-ignored — never commit real keys) with the variables below.
+Start Qdrant locally for development with `docker compose up -d qdrant`. For deployment, set `QDRANT_URL` to a secured Qdrant endpoint, configure its API key, and use persistent storage. Then create a `.env` file in the project root (it's git-ignored — never commit real keys) with the variables below.
 
 ### Environment variables
 
-**Gemini (required)** — set `GOOGLE_API_KEY` to a key from [Google AI Studio](https://aistudio.google.com/apikey). Both embeddings and generation go through the Gemini API — no local GPU, model downloads, or separate local server needed.
+**Gemini (required)** — set `GOOGLE_API_KEY` to a key from [Google AI Studio](https://aistudio.google.com/apikey). Gemini is used for embeddings, query rewriting, and answer generation.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -59,13 +60,25 @@ Then create a `.env` file in the project root (it's git-ignored — never commit
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CHUNK_SIZE` | `800` | Characters per chunk |
-| `CHUNK_OVERLAP` | `120` | Overlap between adjacent chunks |
-| `TOP_K` | `4` | Chunks retrieved per query |
+| `CHUNK_SIZE` | `500` | Tokens per chunk; splits prefer paragraphs, sentences, then words |
+| `CHUNK_OVERLAP` | `75` | Overlap tokens between adjacent chunks |
+| `TOP_K` | `3` | Final reranked chunks sent to the model |
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant HTTP endpoint |
+| `QDRANT_API_KEY` | — | Optional Qdrant API key |
+| `QDRANT_COLLECTION` | `rag_chunks` | Collection holding document chunks |
+| `QDRANT_TIMEOUT` | `30` | Client request timeout in seconds |
+| `QDRANT_HNSW_EF` | `128` | HNSW search accuracy/latency setting |
+| `EMBEDDING_BATCH_SIZE` | `64` | Chunk embeddings per ingestion batch |
+| `QUERY_REWRITER_ENABLED` | `true` | Rewrite search queries using conversation context |
+| `RETRIEVAL_CANDIDATE_LIMIT` | `40` | Maximum candidate pool before reranking |
+| `DOCUMENT_LIST_LIMIT` | `1000` | Maximum documents returned by `GET /documents` |
+| `RERANKER_ENABLED` | `true` | Use local cross-encoder reranking |
+| `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Hugging Face cross-encoder model |
+| `RERANKER_DEVICE` | `cpu` | Set to `cuda` when a supported GPU is available |
 | `MAX_NEW_TOKENS` | `1545` | Max tokens in a generated answer |
 | `TEMPERATURE` | `0.3` | Generation temperature |
 | `UPLOAD_DIR` | `data/uploads` | Temp storage during ingestion |
-| `INDEX_DIR` | `data/index` | Persisted FAISS index + metadata |
+| `INDEX_DIR` | `data/index` | Legacy FAISS path; unused by Qdrant backend |
 
 **MCP tools** (all optional; only active when `ENABLE_TOOLS=true`)
 
@@ -93,6 +106,12 @@ Then create a `.env` file in the project root (it's git-ignored — never commit
 
 ## Run the server
 
+Start local Qdrant first if it is not already running:
+
+```bash
+docker compose up -d qdrant
+```
+
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
@@ -102,7 +121,7 @@ Interactive API docs: http://localhost:8000/docs
 ## API
 
 ### `POST /documents/upload`
-Upload a `.pdf`, `.docx`, `.txt`, or `.md` file (multipart form, field name `file`). Extracts text, chunks it, embeds it, and adds it to the FAISS index.
+Upload a `.pdf`, `.docx`, `.txt`, or `.md` file (multipart form, field name `file`). Extracts text, chunks it, embeds it, and adds it to Qdrant.
 
 ```bash
 curl -F "file=@handbook.pdf" http://localhost:8000/documents/upload
@@ -115,7 +134,7 @@ curl -F "file=@handbook.pdf" http://localhost:8000/documents/upload
 List ingested documents and their chunk counts.
 
 ### `DELETE /documents/{doc_id}`
-Removes a document's chunks from the index (rebuilds the FAISS index without them).
+Removes a document's chunks from Qdrant.
 
 ### `POST /chat`
 ```bash
@@ -248,12 +267,14 @@ uvicorn app.main:app --port 8000
 
 ## How it works
 
-1. **Ingestion**: file → extracted text (`document_loader.py`) → chunked with overlap (`text_splitter.py`) → embedded (`embeddings.py`) → stored in FAISS + a parallel JSON metadata store (`vector_store.py`), persisted to `data/index/`.
-2. **Query**: question embedded → FAISS cosine-similarity search (`IndexFlatIP` on normalized vectors) → top-k chunks assembled into a context block → sent to the LLM with a system prompt instructing it to answer only from context (`rag_pipeline.py`) → response + cited source chunks returned.
+1. **Ingestion**: file → extracted text (`document_loader.py`) → 500-token recursive chunks with 75-token overlap (`text_splitter.py`) → embedded in batches (`embeddings.py`) → stored as Qdrant points with indexed document IDs and source metadata (`vector_store.py`).
+2. **Query**: conversation-aware query rewrite → Qdrant HNSW cosine search for original and rewritten query → reciprocal-rank fusion → cross-encoder reranks a bounded candidate set → final chunks sent to the answer model with source citations.
 
 ## Notes & things you may want to change
 
-- **Persistence**: the FAISS index is a single flat index rebuilt on delete — fine for thousands of chunks, but for very large corpora you'll want an approximate index (e.g. `IndexIVFFlat`) and a real database instead of the JSON metadata file.
-- **Concurrency**: a simple `threading.Lock` guards the in-process index. For multiple worker processes, you'd want a shared vector DB (e.g. Qdrant, Weaviate, pgvector) instead of a local FAISS file.
+- **Scale**: Qdrant replaces the local FAISS index and supports approximate HNSW search, on-disk vectors/payloads, batched ingestion, and shared access across API workers. Ten million source documents may translate to tens or hundreds of millions of chunk vectors; production sizing, sharding/replication, storage, and load testing must use the actual chunk count, vector dimension, traffic, and availability target. This repository does not provision or benchmark a Qdrant cluster.
+- **Query cost**: rewriting adds a Gemini request; reranking loads a local sentence-transformers model and increases CPU/GPU and memory use. The first reranking request downloads the model if it is not already cached. Set `QUERY_REWRITER_ENABLED=false` or `RERANKER_ENABLED=false` to disable either stage.
+- **Document listing**: `GET /documents` returns up to `DOCUMENT_LIST_LIMIT` (default 1000) documents; it does not enumerate an arbitrarily large corpus.
+- **Migration**: existing local FAISS data is not imported automatically. Re-ingest source documents into Qdrant or build a separate migration job before switching an existing deployment.
 - **Auth**: there's no authentication on the endpoints — add an API key or OAuth dependency before exposing this publicly.
 - **Model choice**: swap `LLM_MODEL_NAME` / `EMBEDDING_MODEL_NAME` freely for any Gemini generation/embedding model.

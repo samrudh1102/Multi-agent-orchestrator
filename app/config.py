@@ -34,11 +34,30 @@ class Settings(BaseSettings):
     llm_model_name: str = "gemini-3.1-flash-lite"
 
     # -------------------------------------------------------------------------
-    # RAG Configuration
+    # RAG / Qdrant configuration
     # -------------------------------------------------------------------------
 
-    chunk_size: int = 800
-    chunk_overlap: int = 120
+    # Token counts, not characters. Recursive splitting prefers paragraph,
+    # sentence and word boundaries.
+    chunk_size: int = 500
+    chunk_overlap: int = 75
+
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str | None = None
+    qdrant_collection: str = "rag_chunks"
+    qdrant_timeout: float = 30.0
+    qdrant_hnsw_ef: int = 128
+    embedding_batch_size: int = 64
+    document_list_limit: int = 1000
+
+    query_rewriter_enabled: bool = True
+    retrieval_candidate_multiplier: int = 4
+    retrieval_candidate_limit: int = 40
+    retrieval_rrf_k: int = 60
+    reranker_enabled: bool = True
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_device: str = "cpu"
+    reranker_batch_size: int = 16
 
     top_k: int = 3
 

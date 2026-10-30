@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RAG Chatbot API",
-    description="A retrieval-augmented chatbot backend using Google Gemini and FAISS.",
+    description="A retrieval-augmented chatbot backend using Google Gemini and Qdrant.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -75,7 +75,9 @@ async def upload_document(file: UploadFile) -> UploadResponse:
         with temp_path.open("wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        doc_id, num_chunks = rag_pipeline.ingest_document(temp_path, file.filename)
+        doc_id, num_chunks = await asyncio.to_thread(
+            rag_pipeline.ingest_document, temp_path, file.filename
+        )
     except UnsupportedFileTypeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
@@ -107,8 +109,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 request.question, request.history, request.top_k
             )
         else:
-            # rag_pipeline.answer_question is a blocking call (embedding +
-            # FAISS + HTTP); offload it so it doesn't stall the event loop.
+            # Retrieval includes blocking embedding, Qdrant, reranker and model
+            # work; keep it off the event loop.
             answer, sources = await asyncio.to_thread(
                 rag_pipeline.answer_question, request.question, request.history, request.top_k
             )

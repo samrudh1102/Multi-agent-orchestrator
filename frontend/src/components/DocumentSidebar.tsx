@@ -199,7 +199,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({ isOpen, onClos
 
         {/* Footer info */}
         <div className="p-3 border-t border-border-subtle text-[11px] text-slate-500 flex items-center justify-between font-mono">
-          <span>FAISS Vector Index</span>
+          <span>Qdrant Vector Database</span>
           <span className="flex items-center gap-1 text-emerald-400">
             <CheckCircle2 className="w-3 h-3" /> Ready
           </span>

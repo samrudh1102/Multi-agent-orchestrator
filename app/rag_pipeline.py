@@ -7,6 +7,7 @@ from app.llm import generate, generate_stream
 from app.schemas import SourceChunk
 from app.text_splitter import split_documents
 from app.vector_store import get_vector_store
+from app.retrieval import rerank, rewrite_query
 
 SYSTEM_PROMPT = (
  "answer what user asks!"
@@ -34,9 +35,30 @@ def list_documents() -> list[dict]:
     return get_vector_store().list_documents()
 
 
-def retrieve_sources(question: str, top_k: int | None = None) -> list[SourceChunk]:
+def retrieve_sources(
+    question: str,
+    top_k: int | None = None,
+    history: list[dict[str, str]] | None = None,
+) -> list[SourceChunk]:
     store = get_vector_store()
-    results = store.search(question, top_k or settings.top_k)
+    limit = top_k or settings.top_k
+    rewritten = rewrite_query(question, history)
+    candidate_limit = min(settings.retrieval_candidate_limit, max(limit, limit * settings.retrieval_candidate_multiplier))
+    ranked_lists = [store.search(question, candidate_limit)]
+    if rewritten.strip().casefold() != question.strip().casefold():
+        ranked_lists.append(store.search(rewritten, candidate_limit))
+
+    # Reciprocal rank fusion combines original and rewritten query results
+    # without assuming that their raw cosine scores are directly comparable.
+    fused: dict[str, dict] = {}
+    for result_list in ranked_lists:
+        for rank, item in enumerate(result_list, start=1):
+            key = f"{item['doc_id']}:{item['chunk_index']}"
+            if key not in fused:
+                fused[key] = {**item, "score": 0.0}
+            fused[key]["score"] += 1.0 / (settings.retrieval_rrf_k + rank)
+
+    results = rerank(question, sorted(fused.values(), key=lambda x: x["score"], reverse=True), limit)
 
     return [
         SourceChunk(
@@ -78,7 +100,7 @@ def build_user_prompt(
 def answer_question(
     question: str, history: list[dict[str, str]] | None = None, top_k: int | None = None
 ) -> tuple[str, list[SourceChunk]]:
-    sources = retrieve_sources(question, top_k)
+    sources = retrieve_sources(question, top_k, history)
     user_prompt = build_user_prompt(question, sources)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -93,7 +115,7 @@ def answer_question_stream(
 ) -> tuple[list[SourceChunk], Iterator[str]]:
     """Like answer_question, but returns the retrieved sources up front and a
     generator that yields the answer in text deltas as it's generated."""
-    sources = retrieve_sources(question, top_k)
+    sources = retrieve_sources(question, top_k, history)
     user_prompt = build_user_prompt(question, sources)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
